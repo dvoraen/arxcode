@@ -228,6 +228,20 @@ class RollResult(NameIntegerLookupModel):
         return Environment(loader=BaseLoader()).from_string(self.template).render(data)
 
 
+class GroupRollResult(NameIntegerLookupModel):
+    """
+    The templates for collaborative (@check/with) roll results.
+    """
+
+    template = models.TextField(
+        help_text="A jinja2 template string that will be output with "
+        "the message for this result."
+    )
+
+    def render(self, **data):
+        return Environment(loader=BaseLoader()).from_string(self.template).render(data)
+
+
 class DamageRating(NameIntegerLookupModel):
     """Mapping of how much damage harm does, mapping severity to damage amount"""
 

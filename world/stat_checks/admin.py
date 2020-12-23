@@ -2,6 +2,7 @@ from django.contrib import admin
 from world.stat_checks.models import (
     NaturalRollType,
     RollResult,
+    GroupRollResult,
     StatWeight,
     DifficultyRating,
     DamageRating,
@@ -21,6 +22,11 @@ class NaturalRollTypeAdmin(admin.ModelAdmin):
 
 
 class RollResultadmin(admin.ModelAdmin):
+    list_display = ("name", "value", "template")
+    ordering = ("value",)
+
+
+class GroupRollResultAdmin(admin.ModelAdmin):
     list_display = ("name", "value", "template")
     ordering = ("value",)
 
@@ -82,6 +88,7 @@ class StatCombinationAdmin(admin.ModelAdmin):
 
 admin.site.register(NaturalRollType, NaturalRollTypeAdmin)
 admin.site.register(RollResult, RollResultadmin)
+admin.site.register(GroupRollResult, GroupRollResultAdmin)
 admin.site.register(StatWeight, StatWeightAdmin)
 admin.site.register(DifficultyRating, DifficultyRatingAdmin)
 admin.site.register(DamageRating, DamageRatingAdmin)
