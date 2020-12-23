@@ -4,6 +4,7 @@ from world.traits.models import Trait
 from world.stat_checks.check_maker import (
     BaseCheckMaker,
     PrivateCheckMaker,
+    GroupCheckMaker,
     ContestedCheckMaker,
     SimpleRoll,
     OpposingRolls,
@@ -26,6 +27,8 @@ class CmdStatCheck(ArxCommand):
         @check/contest name1,name2,name3,etc=stat (+ skill) at <rating>
         @check/contest/here stat (+ skill) at <difficulty rating>
         @check/vs stat (+ skill) vs stat(+skill)=<target name>
+        @check/with stat [+ skill]=<player1>,<player2>,<player3>,etc.
+        @check/with/private stat [+ skill]=<player1>,<player2>,<player3>,etc.
 
     Normal check is at a difficulty rating. Rating must be one of 
     {difficulty_ratings}.
@@ -33,6 +36,13 @@ class CmdStatCheck(ArxCommand):
     check/contest allows a GM to have everyone selected to make a check,
     listing the results in order of results. check/contest/here is 
     shorthand to check everyone in a room aside from the GM.
+
+    check/with is a collaborative roll for a given check.  The user of
+    the command and each specific player will all contribute towards a
+    single result.
+    
+    check/with/private will send the roll only to the participants
+    (the command user and assistants) and any player GMs or Staff present
     """
         ratings = ", ".join(str(ob) for ob in DifficultyRating.get_all_instances())
         return msg.format(difficulty_ratings=ratings)
@@ -43,6 +53,8 @@ class CmdStatCheck(ArxCommand):
                 return self.do_contested_check()
             if "vs" in self.switches:
                 return self.do_opposing_checks()
+            if "with" in self.switches:
+                return self.do_group_check()
             if self.rhs:
                 return self.do_private_check()
             return self.do_normal_check()
@@ -70,6 +82,33 @@ class CmdStatCheck(ArxCommand):
         )
         PrivateCheckMaker.perform_check_for_character(
             self.caller, stat=stat, skill=skill, rating=rating, receivers=receiver_list
+        )
+
+    def do_group_check(self):
+        if not self.rhslist:
+            raise self.error_class("You must specify who is assisting you.")
+
+        # Is this a private roll?
+        is_private = False
+        if "private" in self.switches:
+            is_private = True
+
+        # Make the helper list.
+        helper_list = []
+        for name in self.rhslist:
+            helper = self.caller.search(name.strip(), use_nicks=True)
+            if helper:
+                helper_list.append(helper)
+
+        # Get stat, skill from self.lhs
+        stat, skill = self.get_stat_and_skill_from_args(self.lhs)
+
+        GroupCheckMaker.perform_check_for_characters(
+            self.caller,
+            stat=stat,
+            skill=skill,
+            helpers=helper_list,
+            private_roll=is_private,
         )
 
     def get_check_values_from_args(self, args, syntax):

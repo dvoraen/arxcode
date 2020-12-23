@@ -10,6 +10,9 @@ from world.stat_checks.models import (
     StatCheck,
 )
 
+# I need type hints like a crutch.
+from typing import List
+
 
 TIE_THRESHOLD = 5
 
@@ -283,6 +286,39 @@ class DefinedRoll(SimpleRoll):
         return roll_message
 
 
+class GroupRoll:
+    # What we need:
+    # - All the players involved in the roll, incl. caller
+    # - Access to player traits and knacks.
+    # - The raw rolls of each player
+    # - The thresholds for each stage of success.
+    # - Comparisons to those thresholds.
+
+    # What to research:
+    # - ModifierHandler
+    # - Database (models for group check thresholds)
+    #    * model for group check thresholds
+    #    * jinja2 templates needed for the result strings
+    #       ^ result rolls (DISASTER, LEGENDARY!!1!)
+    #       ? noteworthy rolls ("contributed greatly!")
+
+    def execute(self):
+        pass
+
+    def build_result_strings(self) -> List[str]:
+        msgs = [
+            f"|w*** |c{self.character} |whas called for a group check of |n{check_string}|w. ***|n",
+            f"|wParticipating: |n{self.character}, {', '.join(sorted(self.helpers))}",
+        ]
+        return msgs
+
+    @staticmethod
+    def get_stat_skill_string(stat, skill):
+        if skill:
+            return f"{stat} and {skill}"
+        return f"{stat}"
+
+
 class BaseCheckMaker:
     roll_class = SimpleRoll
 
@@ -326,6 +362,79 @@ class PrivateCheckMaker:
         roll = self.roll_class(character=self.character, **self.kwargs)
         roll.execute()
         roll.announce_to_players()
+
+
+class GroupCheckMaker:
+    roll_class = GroupRoll
+
+    def __init__(self, character, roll_class=None, **kwargs):
+        self.character = character
+        self.room = character and character.location
+        self.kwargs = kwargs
+        self.roll: GroupRoll = None
+        self.stat: str = self.kwargs.get("stat")
+        self.skill: str = self.kwargs.get("skill", None)
+        self.helpers: list = self.kwargs.get("helpers", [])
+        self.private_roll: bool = self.kwargs.get("private_roll", False)
+        if roll_class:
+            self.roll_class = roll_class
+
+    @classmethod
+    def perform_check_for_character(cls, character, **kwargs):
+        check = cls(character, **kwargs)
+        check.make_check()
+        check.announce()
+
+    def make_check(self):
+        if not self.roll:
+            self.roll = self.roll_class(character=self.character, **self.kwargs)
+        self.roll.execute()
+
+    def announce(self):
+        msgs = self.roll.build_result_strings()
+
+        if not self.private_roll:
+            self.announce_to_room(msgs)
+        else:
+            self.announce_to_players(msgs, self.helpers)
+            self.announce_to_player_gms(msgs)
+            self.announce_to_staff(msgs)
+
+    def announce_to_room(self, msg_list: List[str]):
+        for msg in msg_list:
+            self.character.msg_location_or_contents(msg, options={"roll": True})
+
+    def announce_to_players(self, msg_list: List[str], player_list: list):
+        """
+        Sends the contents of msg_list to each player on player_list
+        and this command's caller.
+        """
+
+        # Send to caller.
+        for msg in msg_list:
+            self.character.msg(msg, options={"roll": True})
+
+        # Send to assistants.
+        for player in player_list:
+            for msg in msg_list:
+                player.msg(msg, options={"roll": True})
+
+    def announce_to_player_gms(self, msg_list: List[str]):
+        """ Sends the contents of msg_list to any PC GMs in the room. """
+        gm_list = []
+
+        for pc_gm in gm_list:
+            for msg in msg_list:
+                pc_gm.msg(msg, options={"roll": True})
+
+    def announce_to_staff(self, msg_list: List[str]):
+        """ Sends the contents of msg_list to any Staff GMs in the room. """
+        staff_list = []
+
+        # Send to those staff.
+        for staff in staff_list:
+            for msg in msg_list:
+                staff.msg(msg, options={"roll": True})
 
 
 class RollResults:
