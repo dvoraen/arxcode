@@ -39,7 +39,7 @@ class CmdStatCheck(ArxCommand):
 
     check/with is a collaborative roll for a given check.  The user of
     the command and each specific player will all contribute towards a
-    single result.
+    single result, which measures how well the players did.
     
     check/with/private will send the roll only to the participants
     (the command user and assistants) and any player GMs or Staff present
@@ -85,8 +85,11 @@ class CmdStatCheck(ArxCommand):
         )
 
     def do_group_check(self):
+        # Gotta have helpers to use this command.
         if not self.rhslist:
-            raise self.error_class("You must specify who is assisting you.")
+            raise self.error_class(
+                "@check/with: You must specify who is assisting you."
+            )
 
         # Is this a private roll?
         is_private = False
@@ -100,6 +103,12 @@ class CmdStatCheck(ArxCommand):
             if helper:
                 helper_list.append(helper)
 
+        # Can't include yourself as a helper; you already are helping!
+        if self.caller in helper_list:
+            raise self.error_class(
+                "@check/with: Exclude yourself; specify only other characters as helpers."
+            )
+
         # Get stat, skill from self.lhs
         stat, skill = self.get_stat_and_skill_from_args(self.lhs)
 
@@ -107,7 +116,7 @@ class CmdStatCheck(ArxCommand):
             self.caller,
             stat=stat,
             skill=skill,
-            helpers=helper_list,
+            helpers=set(helper_list),
             private_roll=is_private,
         )
 
