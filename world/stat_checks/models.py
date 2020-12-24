@@ -18,6 +18,40 @@ class DifficultyRating(NameIntegerLookupModel):
         return instances[int(len(instances) / 2)]
 
 
+class GroupRollRating(NameIntegerLookupModel):
+    """Lookup table for final group rolls (@check/with).  Maps names to
+    minimum values for a given tier of excellence and its result
+    template."""
+
+    template = models.TextField(
+        help_text="A jinja2 template string that will be output with "
+        "the message for this result. 'result' is the context variable "
+        "for the render: eg: 'a/an {{result}} task'"
+    )
+
+    @classmethod
+    def get_roll_instance(cls, total: int) -> "GroupRollRating":
+        instances = sorted(cls.get_all_instances(), key=lambda i: i.value)
+        if not instances:
+            raise ValueError(
+                "No 'Group roll rating' messages are defined in the database."
+            )
+
+        rank = max(
+            [ins for ins in instances if ins.value <= total],
+            key=lambda i: i.value,
+            default=instances[0],
+        )
+
+        # We only worry about the aggregate result here.  Crit/botch handling
+        # has already been done by GroupRollPlayerResult so we're just concerned
+        # with the rank of the group here.
+        return instances[rank]
+
+    def render(self, **data):
+        return Environment(loader=BaseLoader()).from_string(self.template).render(data)
+
+
 class StatWeight(SharedMemoryModel):
     """Lookup table for the weights attached to different stat/skill/knack levels"""
 
@@ -228,7 +262,7 @@ class RollResult(NameIntegerLookupModel):
         return Environment(loader=BaseLoader()).from_string(self.template).render(data)
 
 
-class GroupRollResult(NameIntegerLookupModel):
+class GroupRollPlayerResult(NameIntegerLookupModel):
     """
     The templates for collaborative (@check/with) roll results.
     """
@@ -237,6 +271,40 @@ class GroupRollResult(NameIntegerLookupModel):
         help_text="A jinja2 template string that will be output with "
         "the message for this result."
     )
+
+    @classmethod
+    def get_roll_instance(
+        cls, full_roll: int, roll_type: Union["NaturalRollType", None] = None
+    ) -> "GroupRollPlayerResult":
+
+        instances = sorted(cls.get_all_instances(), key=lambda ins: ins.value)
+        if not instances:
+            raise ValueError(
+                "No 'Group roll player result' messages are defined in the database."
+            )
+
+        # Get the highest ranking instance from among those that exist.
+        rank = max(
+            [ins for ins in instances if ins.value <= full_roll],
+            key=lambda i: i.value,
+            default=instances[0],
+        )
+
+        # If no crit/botch, we're done.
+        if not roll_type:
+            return rank
+
+        # Adjust for crit/botch.
+        index = instances.index(rank)
+        index += roll_type.result_shift
+
+        if index < 0:
+            return instances[0]
+
+        if index >= len(instances):
+            return instances[-1]
+
+        return instances[index]
 
     def render(self, **data):
         return Environment(loader=BaseLoader()).from_string(self.template).render(data)

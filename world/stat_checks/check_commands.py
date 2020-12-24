@@ -28,8 +28,7 @@ class CmdStatCheck(ArxCommand):
         @check/contest/here stat (+ skill) at <difficulty rating>
         @check/vs stat (+ skill) vs stat(+skill)=<target name>
         @check/with stat [+ skill]=<player1>,<player2>,<player3>,etc.
-        @check/with/private stat [+ skill]=<player1>,<player2>,<player3>,etc.
-
+    
     Normal check is at a difficulty rating. Rating must be one of 
     {difficulty_ratings}.
     
@@ -39,10 +38,7 @@ class CmdStatCheck(ArxCommand):
 
     check/with is a collaborative roll for a given check.  The user of
     the command and each specific player will all contribute towards a
-    single result, which measures how well the players did.
-    
-    check/with/private will send the roll only to the participants
-    (the command user and assistants) and any player GMs or Staff present
+    single result, which measures how well the players did at the task.
     """
         ratings = ", ".join(str(ob) for ob in DifficultyRating.get_all_instances())
         return msg.format(difficulty_ratings=ratings)
@@ -91,11 +87,6 @@ class CmdStatCheck(ArxCommand):
                 "@check/with: You must specify who is assisting you."
             )
 
-        # Is this a private roll?
-        is_private = False
-        if "private" in self.switches:
-            is_private = True
-
         # Make the helper list.
         helper_list = []
         for name in self.rhslist:
@@ -112,12 +103,15 @@ class CmdStatCheck(ArxCommand):
         # Get stat, skill from self.lhs
         stat, skill = self.get_stat_and_skill_from_args(self.lhs)
 
+        # Private roll argument exists for future upgrade.
+        # See GroupCheckMaker.announce() in check_maker.py for details
+        # of how I envision that.
         GroupCheckMaker.perform_check_for_characters(
             self.caller,
             stat=stat,
             skill=skill,
             helpers=set(helper_list),
-            private_roll=is_private,
+            private_roll=False,
         )
 
     def get_check_values_from_args(self, args, syntax):
