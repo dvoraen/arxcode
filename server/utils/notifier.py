@@ -5,22 +5,49 @@ Contains classes for various forms of notifying players, PC GMs, staff, and
 so on.  The purpose of these classes is to reduce code for sending messages
 to specific subsets of the game.  (e.g. - send only to staff in a given room)
 
-USAGE (example code):
 
-# This code will send "Hello, world!" then 'msg' to all player GMs
-# and staff GMs in the given room.
-gm_notifier = RoomNotifier(caller, room=caller.location, to_gm=True, to_staff=True)
+USAGE
+
+The base Notifier class supports the following (boolean) to_flags arguments,
+each of which default to False if not found in the to_flags argument:
+
+* to_player - this notifier sends to non-gm players
+* to_gm - this notifier sends to gm players
+* to_staff - this notifier sends to staff players
+
+Subclasses of Notifier differ in how they source characters, which is why
+it is required to override _source_characters() when deriving from Notifier.
+
+INHERITANCE TREE
+
+Notifier
+- RoomNotifier
+- ListNotifier
+    - SelfListNotifier
+
+EXAMPLE CODE
+
+# This code will send "Hello, world!" to all player GMs
+# and staff in the given room.
+gm_notifier = RoomNotifier(
+    caller,
+    room=caller.location,
+    to_gm=True,
+    to_staff=True
+)
+gm_notifier.generate()
 gm_notifier.notify("Hello, world!")
-gm_notifier.notify(msg)
 """
-from typing import List, Dict, Union
+
+from abc import ABC, abstractmethod
+from typing import List, Dict, Optional
 
 
 class NotifyError(Exception):
     pass
 
 
-class Notifier:
+class Notifier(ABC):
     """
     Base class for sending notifications to the game.
     This class is meant to be derived from and its ('private') code
@@ -35,9 +62,18 @@ class Notifier:
         self.caller = caller
         self.to_flags = to_flags
 
+        self.player_set = set()
+        self.gm_set = set()
+        self.staff_set = set()
+
         self.receiver_set = set()
 
-    def notify(self, msg: str, options: Union[Dict, None] = None):
+    def generate(self):
+        """Generates the receiver list for this notifier."""
+        self._source_characters()
+        self._filter_receivers()
+
+    def notify(self, msg: str, options: Optional[Dict[str, bool]] = None):
         """Notifies each receiver of msg with the given options, if any."""
         for rcvr in self.receiver_set:
             rcvr.msg(msg, options)
@@ -47,10 +83,23 @@ class Notifier:
         return self.receiver_set
 
     @property
+    def player_names(self) -> List[str]:
+        return [str(player) for player in self.player_set]
+
+    @property
+    def gm_names(self) -> List[str]:
+        return [str(gm) for gm in self.gm_set]
+
+    @property
+    def staff_names(self) -> List[str]:
+        return [str(staff) for staff in self.staff_set]
+
+    @property
     def receiver_names(self) -> List[str]:
         return [str(player) for player in self.receiver_set]
 
-    def generate(self):
+    @abstractmethod
+    def _source_characters(self):
         pass
 
     def _filter_players(self) -> set:
@@ -62,42 +111,32 @@ class Notifier:
 
     def _filter_gms(self) -> set:
         """Returns all player GMs in receiver_set."""
-        gm_set = {
-            char
-            for char in self.receiver_set
-            if char.check_staff_or_gm() and not char.check_permstring("builder")
-        }
+        gm_set = {char for char in self.receiver_set if char.is_gm()}
         return gm_set
 
     def _filter_staff(self) -> set:
         """Returns all staff in receiver_set."""
-        staff_set = {
-            char for char in self.receiver_set if char.check_permstring("builder")
-        }
+        staff_set = {char for char in self.receiver_set if char.is_staff()}
         return staff_set
 
     def _filter_receivers(self):
         """Returns all receivers designated by the given receiver flags."""
-        player_set = set()
-        gm_set = set()
-        staff_set = set()
-
         if self.to_flags.get("to_player", False):
-            player_set = self._filter_players()
+            self.player_set = self._filter_players()
 
         if self.to_flags.get("to_gm", False):
-            gm_set = self._filter_gms()
+            self.gm_set = self._filter_gms()
 
         if self.to_flags.get("to_staff", False):
-            staff_set = self._filter_staff()
+            self.staff_set = self._filter_staff()
 
-        self.receiver_set = player_set | gm_set | staff_set
+        self.receiver_set = self.player_set | self.gm_set | self.staff_set
 
 
 class RoomNotifier(Notifier):
     """
     Notifier for sending to everyone in a room, filtered by
-    the to_ flags.
+    the to_flags.
     """
 
     def __init__(
@@ -109,11 +148,7 @@ class RoomNotifier(Notifier):
         super().__init__(caller, **to_flags)
         self.room = room
 
-    def generate(self):
-        self._get_room_characters()
-        self._filter_receivers()
-
-    def _get_room_characters(self):
+    def _source_characters(self):
         """
         Generates the source receiver list from all characters
         in the given room.
@@ -138,11 +173,7 @@ class ListNotifier(Notifier):
 
         self.receiver_list = receivers or []
 
-    def generate(self):
-        self._get_list_characters()
-        self._filter_receivers()
-
-    def _get_list_characters(self):
+    def _source_characters(self):
         for name in self.receiver_list:
             receiver = self.caller.search(name, use_nicks=True)
             if receiver:
@@ -163,13 +194,9 @@ class SelfListNotifier(ListNotifier):
     ):
         super().__init__(caller, receivers, **to_flags)
 
-    def generate(self):
-        self._get_list_characters()
-        self._filter_receivers()
-
-    def _get_list_characters(self) -> set:
+    def _source_characters(self) -> set:
         """Generates the source receiver list from passed in receivers."""
-        super()._get_list_characters()
+        super()._source_characters()
 
         # Caller always sees their notifications in this notifier if
         # they're part of the to_flags set.

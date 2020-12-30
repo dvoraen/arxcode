@@ -1273,15 +1273,21 @@ class Character(
     def char_ob(self):
         return self
 
-    def check_staff_or_gm(self):
-        if self.check_permstring("builders"):
-            return True
+    def is_gm(self) -> bool:
         if not self.location or not self.dompc:
             return False
         event = self.location.event
         if not event:
             return False
         return self.dompc in event.gms.all()
+
+    def is_staff(self) -> bool:
+        if self.check_permstring("builders"):
+            return True
+        return False
+
+    def check_staff_or_gm(self) -> bool:
+        return self.is_gm() or self.is_staff()
 
     def take_damage(
         self,
