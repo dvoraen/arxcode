@@ -49,8 +49,8 @@ class NotifyError(Exception):
 
 class Notifier(ABC):
     """
-    Base class for sending notifications to the game.
-    This class is meant to be derived from and its ('private') code
+    Abstract base class for sending notifications to the game.
+    This class is meant to be derived from and its 'protected' code
     utilized in derived classes (to lower code duplication).
     """
 
@@ -102,33 +102,30 @@ class Notifier(ABC):
     def _source_characters(self):
         pass
 
-    def _filter_players(self) -> set:
+    def _filter_players(self):
         """Returns all non-gm, non-staff players in receiver_set."""
-        player_set = {
+        self.player_set = {
             char for char in self.receiver_set if not char.check_staff_or_gm()
         }
-        return player_set
 
-    def _filter_gms(self) -> set:
+    def _filter_gms(self):
         """Returns all player GMs in receiver_set."""
-        gm_set = {char for char in self.receiver_set if char.is_gm()}
-        return gm_set
+        self.gm_set = {char for char in self.receiver_set if char.is_gm()}
 
-    def _filter_staff(self) -> set:
+    def _filter_staff(self):
         """Returns all staff in receiver_set."""
-        staff_set = {char for char in self.receiver_set if char.is_staff()}
-        return staff_set
+        self.staff_set = {char for char in self.receiver_set if char.is_staff()}
 
     def _filter_receivers(self):
         """Returns all receivers designated by the given receiver flags."""
         if self.to_flags.get("to_player", False):
-            self.player_set = self._filter_players()
+            self._filter_players()
 
         if self.to_flags.get("to_gm", False):
-            self.gm_set = self._filter_gms()
+            self._filter_gms()
 
         if self.to_flags.get("to_staff", False):
-            self.staff_set = self._filter_staff()
+            self._filter_staff()
 
         self.receiver_set = self.player_set | self.gm_set | self.staff_set
 
