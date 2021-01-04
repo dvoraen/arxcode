@@ -161,10 +161,12 @@ class SimpleRoll:
         staff_notifier.generate()
 
         # Staff names get highlighted because they're fancy
-        staff_names = [f"|c{name}|n" for name in sorted(staff_notifier.receiver_names)]
+        staff_names = [
+            f"|c{name}|n" for name in sorted(staff_notifier.receiver_names())
+        ]
 
         # Build list of who is receiving this private roll.  Staff are last
-        receiver_names = sorted(player_notifier.receiver_names) + staff_names
+        receiver_names = sorted(player_notifier.receiver_names()) + staff_names
 
         # If only the caller is here to see it, only the caller will be
         # listed for who saw it.
