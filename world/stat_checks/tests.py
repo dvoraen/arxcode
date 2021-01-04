@@ -100,8 +100,7 @@ class TestCheckCommands(ArxCommandTest):
             options=self.options,
         )
 
-    @patch("server.utils.notifier.Notifier._filter_gms")
-    def test_stat_check_cmd_private(self, mock_gms, mock_randint):
+    def test_stat_check_cmd_private(self, mock_randint):
         """Test private roll messaging."""
         # Setup extra characters.
         self.add_character(3)
@@ -111,7 +110,11 @@ class TestCheckCommands(ArxCommandTest):
 
         mock_randint.return_value = 25
 
-        mock_gms.return_value = set()
+        # Char2 is faking at being a player GM
+        mock_gm = Mock()
+        self.char2.is_gm = mock_gm
+        mock_gm.return_value = True
+
         # (Staff) Char shares with self -> Char only gets it.
         self.call_cmd(
             "dex at normal=Char",
@@ -128,7 +131,6 @@ class TestCheckCommands(ArxCommandTest):
             caller=self.char3,
         )
 
-        mock_gms.return_value = {self.char2}
         # (Staff) Char shares with (GM) Char2, Char4 -> Char2, Char4, Char get it
         # Char3 should NOT get it.
         self.call_cmd(
@@ -136,7 +138,6 @@ class TestCheckCommands(ArxCommandTest):
             f"[Private Roll] {self.char1} checks dex at {self.normal}. {self.char1} rolls marginal. (Shared with: Char2, Char4, Char)",
         )
 
-        mock_gms.return_value = set()
         # Char4 shares with Char3 -> Char3, Char4, Char get it.
         # Char2 should NOT get it.
         self.call(
@@ -146,7 +147,6 @@ class TestCheckCommands(ArxCommandTest):
             caller=self.char4,
         )
 
-        mock_gms.return_value = {self.char2}
         # Char3 shares with (GM) Char2 -> Char2, Char3, Char get it.
         # Char4 should NOT get it.
         self.call(
@@ -156,7 +156,6 @@ class TestCheckCommands(ArxCommandTest):
             caller=self.char3,
         )
 
-        mock_gms.return_value = set()
         # Char4 shares with Char3 -> Char3, Char4, Char get it.
         # Char2 should NOT get it.
         self.call(
