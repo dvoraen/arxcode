@@ -10,7 +10,7 @@ from world.stat_checks.models import (
     StatCheck,
 )
 
-from server.utils.notifier import RoomNotifier, SelfListNotifier
+from server.utils.notifier import RoomNotifier, ListNotifier
 
 
 TIE_THRESHOLD = 5
@@ -143,9 +143,10 @@ class SimpleRoll:
 
         # SelfListNotifier will notify the caller if a player or
         # player GM, and notify every player/player-GM on the list.
-        player_notifier = SelfListNotifier(
+        player_notifier = ListNotifier(
             self.character,
             receivers=self.receivers,
+            to_caller=True,
             to_player=True,
             to_gm=True,
         )

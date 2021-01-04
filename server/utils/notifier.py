@@ -123,18 +123,6 @@ class Notifier(ABC):
     def _source_characters(self):
         pass
 
-    def _filter_players(self) -> set:
-        """Returns all non-gm, non-staff players in receiver_set."""
-        return {char for char in self.receiver_set if not char.check_staff_or_gm()}
-
-    def _filter_gms(self) -> set:
-        """Returns all player GMs in receiver_set."""
-        return {char for char in self.receiver_set if char.is_gm()}
-
-    def _filter_staff(self) -> set:
-        """Returns all staff in receiver_set."""
-        return {char for char in self.receiver_set if char.is_staff()}
-
     def _filter_receivers(self):
         """Returns all receivers designated by the given receiver flags."""
         player_set = set()
@@ -142,13 +130,13 @@ class Notifier(ABC):
         staff_set = set()
 
         if self.to_flags.get("to_player", False):
-            player_set = self._filter_players()
+            player_set = set(self.players())
 
         if self.to_flags.get("to_gm", False):
-            gm_set = self._filter_gms()
+            gm_set = set(self.gms())
 
         if self.to_flags.get("to_staff", False):
-            staff_set = self._filter_staff()
+            staff_set = set(self.staff())
 
         self.receiver_set = player_set | gm_set | staff_set
 
@@ -157,6 +145,11 @@ class RoomNotifier(Notifier):
     """
     Notifier for sending to everyone in a room, filtered by
     the to_flags.
+
+    TO_FLAGS Supported:
+    - to_player - include non-gm players in this notification
+    - to_gm - include player-gms in this notification
+    - to_staff - include staff in this notification
     """
 
     def __init__(
@@ -173,10 +166,10 @@ class RoomNotifier(Notifier):
         Generates the source receiver list from all characters
         in the given room.
         """
-        if self.room:
-            self.receiver_set = {
-                char for char in self.room.contents if char.is_character
-            }
+        if not self.room:
+            raise NotifyError("expected room, received None")
+
+        self.receiver_set = {char for char in self.room.contents if char.is_character}
 
 
 class ListNotifier(Notifier):
@@ -184,8 +177,12 @@ class ListNotifier(Notifier):
     Notifier for sending only to the passed in list of receivers,
     then filtered by the to_flags.
 
-    NOTE: The caller is not notified when using ListNotifier.  Use
-    SelfListNotifier to get this behavior.
+    TO_FLAGS Supported:
+    - to_player - include non-gm players in this notification
+    - to_gm - include player-gms in this notification
+    - to_staff - include staff in this notification
+    - to_caller - include the caller in this notification (if applicable)
+                Callers are filtered out if other to_flags are not set.
     """
 
     def __init__(self, caller, receivers: List[str] = None, **to_flags):
@@ -199,25 +196,13 @@ class ListNotifier(Notifier):
             if receiver:
                 self.receiver_set.add(receiver)
 
+    def _filter_receivers(self):
+        # The caller is added before the call to Notifier._filter_receivers()
+        # so that the caller can be properly filtered as well.  If the caller
+        # were added AFTER the super() call, it guarantees a place but other
+        # notifiers could potentially notify the caller and thus you get a
+        # multi-notification that isn't desirable.
+        if self.to_flags.get("to_caller", False):
+            self.receiver_set.add(self.caller)
 
-class SelfListNotifier(ListNotifier):
-    """
-    Notifier for sending only to the passed in list of receivers and
-    the caller, then filtered by the to_flags.
-    """
-
-    def __init__(
-        self,
-        caller,
-        receivers: List[str],
-        **to_flags,
-    ):
-        super().__init__(caller, receivers, **to_flags)
-
-    def _source_characters(self) -> set:
-        """Generates the source receiver list from passed in receivers."""
-        super()._source_characters()
-
-        # Caller always sees their notifications in this notifier if
-        # they're part of the to_flags set.
-        self.receiver_set.add(self.caller)
+        super()._filter_receivers()
