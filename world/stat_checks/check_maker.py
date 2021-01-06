@@ -10,7 +10,7 @@ from world.stat_checks.models import (
     StatCheck,
 )
 
-from server.utils.notifier import RoomNotifier, ListNotifier
+from server.utils.notifier import ListNotifier, RoomNotifier
 
 
 TIE_THRESHOLD = 5
@@ -137,12 +137,9 @@ class SimpleRoll:
         Sends a private roll result message to specific players as well as
         to all GMs (player and staff) at that character's location.
         """
-        # Notifiers will source nothing if self.character.location is None
-        # or if self.receivers is None.
-        # They will have empty receiver lists, and thus not do anything.
-
-        # SelfListNotifier will notify the caller if a player or
-        # player GM, and notify every player/player-GM on the list.
+        # ListNotifier will notify the caller if a player or player GM,
+        # and notify every player/player-GM on the list if they're in
+        # the same room as the caller.
         player_notifier = ListNotifier(
             self.character,
             receivers=self.receivers,

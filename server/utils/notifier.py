@@ -19,7 +19,7 @@ Subclasses of Notifier differ in how they source characters, which is why
 it is required to override _source_characters() when deriving from Notifier.
 
 CODE USAGE
-1. Initialize a notifier.  (Example below.)
+1. Initialize a notifier; see individual classes for to_flags documentation.
 2. Notifier.generate() -- this must be called after setup but before any
    other methods or properties are called.  Call generate() only once.
 3. Notifier.notify() -- this will send your message to the receivers
@@ -82,42 +82,28 @@ class Notifier(ABC):
             rcvr.msg(msg, options)
 
     def receivers(self):
-        for player in self.receiver_set:
-            yield player
+        yield from self.receiver_set
 
     def players(self):
-        for player in self.receiver_set:
-            if not player.check_staff_or_gm():
-                yield player
+        yield from (pc for pc in self.receiver_set if not pc.check_staff_or_gm())
 
     def gms(self):
-        for player in self.receiver_set:
-            if player.is_gm():
-                yield player
+        yield from (pc for pc in self.receiver_set if pc.is_gm())
 
     def staff(self):
-        for player in self.receiver_set:
-            if player.is_staff():
-                yield player
+        yield from (pc for pc in self.receiver_set if pc.is_staff())
 
     def receiver_names(self) -> str:
-        for player in self.receiver_set:
-            yield str(player)
+        yield from (str(pc) for pc in self.receiver_set)
 
     def player_names(self) -> str:
-        for player in self.receiver_set:
-            if not player.check_staff_or_gm():
-                yield str(player)
+        yield from (str(pc) for pc in self.receiver_set if not pc.check_staff_or_gm())
 
     def gm_names(self) -> str:
-        for player in self.receiver_set:
-            if player.is_gm():
-                yield str(player)
+        yield from (str(pc) for pc in self.receiver_set if pc.is_gm())
 
     def staff_names(self) -> str:
-        for player in self.receiver_set:
-            if player.is_staff():
-                yield str(player)
+        yield from (str(pc) for pc in self.receiver_set if pc.is_staff())
 
     @abstractmethod
     def _source_characters(self):
@@ -139,6 +125,116 @@ class Notifier(ABC):
             staff_set = set(self.staff())
 
         self.receiver_set = player_set | gm_set | staff_set
+
+
+class DomainNotifier(Notifier):
+    """
+    Notifier for sending to the owner(s) of a domain.
+
+    TO_FLAGS Supported:
+    - to_staff - include staff in this notification
+    - to_caller - include the caller in this notification (if applicable)
+    """
+
+    def __init__(self, caller, domain, **to_flags):
+        super().__init__(caller, **to_flags)
+
+        self.domain = domain
+
+    def _source_characters(self):
+        # Grab all the rulers of the domain or just the one?
+        self._source_rulers()
+
+        if self.to_flags.get("to_staff", False):
+            self._source_staff()
+
+        if self.to_flags.get("to_caller", False):
+            self.receiver_set.add(self.caller)
+
+    def _source_rulers(self):
+        pass
+
+    def _source_staff(self):
+        staff_qs = AccountDB.objects.filter(db_is_connected=True, is_staff=True)
+        for staff in staff_qs:
+            self.receiver_set.add(staff)
+
+
+class ListNotifier(Notifier):
+    """
+    Notifier for sending only to the passed in list of receivers,
+    then filtered by the to_flags.
+
+    TO_FLAGS Supported:
+    - to_player - include non-gm players in this notification
+    - to_gm - include player-gms in this notification
+    - to_staff - include staff in this notification
+
+    - to_global - sources players on the list from anywhere in the game
+                  if false, sources from the same room as self.character
+    - to_caller - sources the caller in this notification (if applicable)
+    """
+
+    def __init__(self, caller, receivers: List[str] = None, **to_flags):
+        super().__init__(caller, **to_flags)
+
+        self.receiver_list = receivers or []
+
+    def _source_characters(self):
+        # Source the receivers on the list.
+        for name in self.receiver_list:
+            if self.to_flags.get("to_global", False):
+                receiver = self.caller.search(name, use_nicks=True, global_search=True)
+            else:
+                receiver = self.caller.search(name, use_nicks=True)
+            if receiver:
+                self.receiver_set.add(receiver)
+
+        # Source the caller.
+        # The caller is added before the call to Notifier._filter_receivers()
+        # so that the caller can be properly filtered as well.  If the caller
+        # were added AFTER the filtering, it guarantees the caller is
+        # notified but other notifiers could also potentially notify the caller
+        # and thus you get a multi-notification that isn't desirable.
+        if self.to_flags.get("to_caller", False):
+            self.receiver_set.add(self.caller)
+
+
+class OrgNotifier(Notifier):
+    """
+    Notifier for sending to members of an organization, based
+    on passed in ranks.
+
+    TO_FLAGS Supported:
+    - to_staff - include staff in this notification
+    - to_caller - source the caller in this notification
+    - to_ranks - source characters only from the provided list of ranks
+    """
+
+    def __init__(self, caller, org, ranks: List[int] = None, **to_flags):
+        super().__init__(caller, **to_flags)
+
+        self.org = org
+        self.ranks = ranks or []
+
+    def _source_characters(self):
+        # Source by rank if any ranks are being used for who will
+        # receive this notification.
+        if self.to_flags.get("to_ranks", False):
+            self._source_by_ranks()
+        else:
+            # Otherwise, grab all the players.
+            self._source_all_members()
+
+        # Source the caller in this notification.
+        if self.to_flags.get("to_caller", False):
+            self.receiver_set.add(self.caller)
+
+    def _source_by_ranks(self):
+        pass
+
+    def _source_all_members(self):
+        pass
 
 
 class RoomNotifier(Notifier):
@@ -166,43 +262,11 @@ class RoomNotifier(Notifier):
         Generates the source receiver list from all characters
         in the given room.
         """
-        if not self.room:
+        if self.room is None:
             raise NotifyError("expected room, received None")
 
         self.receiver_set = {char for char in self.room.contents if char.is_character}
 
 
-class ListNotifier(Notifier):
-    """
-    Notifier for sending only to the passed in list of receivers,
-    then filtered by the to_flags.
-
-    TO_FLAGS Supported:
-    - to_player - include non-gm players in this notification
-    - to_gm - include player-gms in this notification
-    - to_staff - include staff in this notification
-    - to_caller - include the caller in this notification (if applicable)
-                Callers are filtered out if other to_flags are not set.
-    """
-
-    def __init__(self, caller, receivers: List[str] = None, **to_flags):
-        super().__init__(caller, **to_flags)
-
-        self.receiver_list = receivers or []
-
-    def _source_characters(self):
-        for name in self.receiver_list:
-            receiver = self.caller.search(name, use_nicks=True)
-            if receiver:
-                self.receiver_set.add(receiver)
-
-    def _filter_receivers(self):
-        # The caller is added before the call to Notifier._filter_receivers()
-        # so that the caller can be properly filtered as well.  If the caller
-        # were added AFTER the super() call, it guarantees a place but other
-        # notifiers could potentially notify the caller and thus you get a
-        # multi-notification that isn't desirable.
-        if self.to_flags.get("to_caller", False):
-            self.receiver_set.add(self.caller)
-
-        super()._filter_receivers()
+class ShardhavenNotifier(Notifier):
+    pass
