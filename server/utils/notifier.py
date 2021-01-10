@@ -49,6 +49,8 @@ gm_notifier.notify("Hello, world!")
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 
+OptionsDict = Dict[str, bool]
+
 
 class NotifyError(Exception):
     pass
@@ -71,12 +73,15 @@ class Notifier(ABC):
 
         self.receiver_set = set()
 
+    def __repr__(self):
+        return f"<Notifier: {self.to_flags}>"
+
     def generate(self):
         """Generates the receiver list for this notifier."""
         self._source_characters()
         self._filter_receivers()
 
-    def notify(self, msg: str, options: Optional[Dict[str, bool]] = None):
+    def notify(self, msg: str, options: Optional[OptionsDict] = None):
         """Notifies each receiver of msg with the given options, if any."""
         for rcvr in self.receiver_set:
             rcvr.msg(msg, options)
@@ -141,6 +146,9 @@ class DomainNotifier(Notifier):
 
         self.domain = domain
 
+    def __repr__(self):
+        return f"<DomainNotifier: {self.domain}; {self.to_flags}>"
+
     def _source_characters(self):
         # Grab all the rulers of the domain or just the one?
         self._source_rulers()
@@ -180,6 +188,9 @@ class ListNotifier(Notifier):
 
         self.receiver_list = receivers or []
 
+    def __repr__(self):
+        return f"<ListNotifier: {self.receiver_list}; {self.to_flags}>"
+
     def _source_characters(self):
         # Source the receivers on the list.
         for name in self.receiver_list:
@@ -217,24 +228,33 @@ class OrgNotifier(Notifier):
         self.org = org
         self.ranks = ranks or []
 
+    def __repr__(self):
+        return f"<OrgNotifier: {self.org}; {self.to_flags}>"
+
+    def notify(self, msg: str, options: Optional[OptionsDict] = None):
+        # How an organization is notified matters if it's a secret
+        # organization.  Thus, override.
+        pass
+
     def _source_characters(self):
         # Source by rank if any ranks are being used for who will
         # receive this notification.
         if self.to_flags.get("to_ranks", False):
-            self._source_by_ranks()
+            self.__source_by_ranks()
         else:
-            # Otherwise, grab all the players.
-            self._source_all_members()
+            # Otherwise, grab all the online players.
+            self.__source_all_members()
 
         # Source the caller in this notification.
         if self.to_flags.get("to_caller", False):
             self.receiver_set.add(self.caller)
 
-    def _source_by_ranks(self):
+    def __source_by_ranks(self):
         pass
 
-    def _source_all_members(self):
-        pass
+    def __source_all_members(self):
+        for member in self.org.online_members():
+            self.receiver_set.add(member)
 
 
 class RoomNotifier(Notifier):
@@ -256,6 +276,9 @@ class RoomNotifier(Notifier):
     ):
         super().__init__(caller, **to_flags)
         self.room = room
+
+    def __repr__(self):
+        return f"<RoomNotifier: {self.room}; {self.to_flags}>"
 
     def _source_characters(self):
         """
