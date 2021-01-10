@@ -9,6 +9,7 @@ from world.stat_checks.check_maker import (
     SpoofRoll,
     RetainerRoll,
     OpposingRolls,
+    get_check_string,
 )
 
 from world.dominion.models import Agent
@@ -181,7 +182,7 @@ class CmdStatCheck(ArxCommand):
             stat, skill, rating = self.get_check_values_from_args(
                 self.rhs, "Usage: stat [+ skill] at <difficulty rating>"
             )
-        prefix = f"{self.caller} has called for a check of {SimpleRoll.get_check_string(stat, skill, rating)}."
+        prefix = f"{self.caller} has called for a check of {get_check_string(stat, skill, rating)}."
         ContestedCheckMaker.perform_contested_check(
             characters, self.caller, prefix, stat=stat, skill=skill, rating=rating
         )

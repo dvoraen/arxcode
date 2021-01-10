@@ -22,163 +22,54 @@ def check_rolls_tied(roll1, roll2, tie_value=TIE_THRESHOLD):
     return abs(roll1.result_value - roll2.result_value) < tie_value
 
 
-@total_ordering
-class SimpleRoll:
-    def __init__(
-        self,
-        character=None,
-        stat=None,
-        skill=None,
-        rating: DifficultyRating = None,
-        receivers: list = None,
-        tie_threshold: int = TIE_THRESHOLD,
-        **kwargs,
-    ):
+def get_check_string(stat, skill, rating) -> str:
+    if skill:
+        return f"{stat} and {skill} at {rating}"
+    return f"{stat} at {rating}"
+
+
+class RawRoll:
+    """
+    A RawRoll is a die roll of a given stat (and skill if applicable)
+    that is modified only by a knack for it, and with determination
+    of being a crit/botch.
+    """
+
+    def __init__(self, character, stat: str = None, skill: str = None):
         self.character = character
-        self.receivers = receivers or []
         self.stat = stat
         self.skill = skill
-        self.result_value = None
-        self.result_message = None
-        self.room = character and character.location
-        self.rating = rating
-        self.raw_roll = None
-        self.roll_result_object = None
-        self.natural_roll_type = None
-        self.tie_threshold = tie_threshold
-        self.roll_kwargs = kwargs
+        self.raw_roll = 0
+        self.full_roll = 0
+        self.natural_roll_type: NaturalRollType = None
 
-    def __lt__(self, other: "SimpleRoll"):
-        """
-        We treat a roll as being less than another if the Result is lower,
-        or same result is outside tie threshold for the result values.
-        """
-        try:
-            if self.roll_result_object == other.roll_result_object:
-                return (self.result_value + self.tie_threshold) < other.result_value
-            return self.roll_result_object.value < other.roll_result_object.value
-        except AttributeError:
-            return NotImplemented
+    @property
+    def is_crit(self) -> bool:
+        if not self.natural_roll_type:
+            return False
+        return self.natural_roll_type.is_crit
 
-    def __eq__(self, other: "SimpleRoll"):
-        """Equal if they have the same apparent result object and the """
-        return (self.roll_result_object == other.roll_result_object) and abs(
-            self.result_value - other.result_value
-        ) <= self.tie_threshold
-
-    def get_roll_value_for_rating(self):
-        return self.rating.value
+    @property
+    def is_botch(self) -> bool:
+        if not self.natural_roll_type:
+            return False
+        return self.natural_roll_type.is_botch
 
     def execute(self):
-        """Does the actual roll"""
         self.raw_roll = randint(1, 100)
-        val = self.get_roll_value_for_traits()
-        val += self.get_roll_value_for_knack()
-        val -= self.get_roll_value_for_rating()
-        val += self.raw_roll
-        self.result_value = val
-        # we use our raw roll and modified toll to determine if our roll is special
+        traits_value = self.get_roll_value_for_traits()
+        knack_value = self.get_roll_value_for_knack()
+
+        self.full_roll = self.raw_roll + traits_value + knack_value
+
+        # Was it a crit, botch, or neither?
         self.natural_roll_type = self.check_for_crit_or_botch()
-        self.roll_result_object = RollResult.get_instance_for_roll(
-            val, natural_roll_type=self.natural_roll_type
-        )
-        self.result_message = self.roll_result_object.render(**self.get_context())
 
-    @property
-    def is_success(self):
-        return self.roll_result_object.is_success
+    def get_roll_value_for_traits(self) -> int:
+        stat_value = self.get_roll_value_for_stat()
+        skill_value = self.get_roll_value_for_skill()
 
-    def get_roll_value_for_traits(self):
-        val = self.get_roll_value_for_stat()
-        val += self.get_roll_value_for_skill()
-        return val
-
-    def get_context(self) -> dict:
-        crit = None
-        botch = None
-        if self.natural_roll_type:
-            if self.natural_roll_type.is_crit:
-                crit = self.natural_roll_type
-            else:
-                botch = self.natural_roll_type
-        return {
-            "character": self.character,
-            "roll": self.result_value,
-            "result": self.roll_result_object,
-            "natural_roll_type": self.natural_roll_type,
-            "crit": crit,
-            "botch": botch,
-        }
-
-    @classmethod
-    def get_check_string(cls, stat, skill, rating):
-        roll_message = f"{stat} "
-        if skill:
-            roll_message += f"and {skill} "
-        roll_message += f"at {rating}"
-        return roll_message
-
-    @property
-    def roll_prefix(self):
-        roll_message = f"{self.character} checks {self.get_check_string(self.stat, self.skill, self.rating)}"
-        return roll_message
-
-    @property
-    def roll_message(self):
-        return f"{self.roll_prefix}. {self.result_message}"
-
-    def announce_to_room(self):
-        self.character.msg_location_or_contents(
-            self.roll_message, options={"roll": True}
-        )
-
-    def announce_to_players(self):
-        """
-        Sends a private roll result message to specific players as well as
-        to all GMs (player and staff) at that character's location.
-        """
-        # Notifiers will source nothing if self.character.location is None
-        # or if self.receivers is None.
-        # They will have empty receiver lists, and thus not do anything.
-
-        # SelfListNotifier will notify the caller if a player or
-        # player GM, and notify every player/player-GM on the list.
-        player_notifier = SelfListNotifier(
-            self.character,
-            receivers=self.receivers,
-            to_player=True,
-            to_gm=True,
-        )
-        # RoomNotifier will notify every staff member in the room
-        staff_notifier = RoomNotifier(
-            self.character,
-            room=self.character.location,
-            to_staff=True,
-        )
-
-        # Generate the receivers of the notifications.
-        player_notifier.generate()
-        staff_notifier.generate()
-
-        # Staff names get highlighted because they're fancy
-        staff_names = [f"|c{name}|n" for name in sorted(staff_notifier.receiver_names)]
-
-        # Build list of who is receiving this private roll.  Staff are last
-        receiver_names = sorted(player_notifier.receiver_names) + staff_names
-
-        # If only the caller is here to see it, only the caller will be
-        # listed for who saw it.
-        if receiver_names:
-            receiver_suffix = f"(Shared with: {', '.join(receiver_names)})"
-        else:
-            receiver_suffix = f"(Shared with: {self.character})"
-
-        # Now that we know who is getting it, build the private message string.
-        private_msg = f"|w[Private Roll]|n {self.roll_message} {receiver_suffix}"
-
-        # Notify everyone of the roll result.
-        player_notifier.notify(private_msg, options={"roll": True})
-        staff_notifier.notify(private_msg, options={"roll": True})
+        return stat_value + skill_value
 
     def get_roll_value_for_stat(self) -> int:
         """
@@ -217,6 +108,112 @@ class SimpleRoll:
         Checks our lookup table with our raw roll and sees if we got a crit or botch.
         """
         return NaturalRollType.get_roll_type(self.raw_roll)
+
+    def get_context(self) -> dict:
+        crit, botch = self._get_context_crit_botch()
+
+        return {
+            "character": self.character,
+            "value": self.full_roll,
+            "crit": crit,
+            "botch": botch,
+        }
+
+    def _get_context_crit_botch(self):
+        crit = None
+        botch = None
+        if self.natural_roll_type:
+            if self.natural_roll_type.is_crit:
+                crit = self.natural_roll_type
+            else:
+                botch = self.natural_roll_type
+
+        return crit, botch
+
+
+@total_ordering
+class SimpleRoll(RawRoll):
+    def __init__(
+        self,
+        character=None,
+        stat: str = None,
+        skill: str = None,
+        rating: DifficultyRating = None,
+        tie_threshold: int = TIE_THRESHOLD,
+        **kwargs,
+    ):
+        super().__init__(character, stat, skill)
+
+        self.rating = rating
+        self.result_value = None
+        self.result_message = None
+        self.room = character and character.location
+        self.roll_result_object = None
+        self.tie_threshold = tie_threshold
+        self.roll_kwargs = kwargs
+
+    def __lt__(self, other: "SimpleRoll"):
+        """
+        We treat a roll as being less than another if the Result is lower,
+        or same result is outside tie threshold for the result values.
+        """
+        try:
+            if self.roll_result_object == other.roll_result_object:
+                return (self.result_value + self.tie_threshold) < other.result_value
+            return self.roll_result_object.value < other.roll_result_object.value
+        except AttributeError:
+            return NotImplemented
+
+    def __eq__(self, other: "SimpleRoll"):
+        """Equal if they have the same apparent result object and the """
+        return (self.roll_result_object == other.roll_result_object) and abs(
+            self.result_value - other.result_value
+        ) <= self.tie_threshold
+
+    def get_roll_value_for_rating(self):
+        return self.rating.value
+
+    def execute(self):
+        """Does the actual roll"""
+        super().execute()
+
+        rating_value = self.get_roll_value_for_rating()
+        self.result_value = self.full_roll - rating_value
+
+        self.roll_result_object = RollResult.get_instance_for_roll(
+            self.result_value, natural_roll_type=self.natural_roll_type
+        )
+        self.result_message = self.roll_result_object.render(**self.get_context())
+
+    @property
+    def is_success(self):
+        return self.roll_result_object.is_success
+
+    def get_context(self) -> dict:
+        crit, botch = self._get_context_crit_botch()
+
+        return {
+            "character": self.character,
+            "roll": self.result_value,
+            "result": self.roll_result_object,
+            "natural_roll_type": self.natural_roll_type,
+            "crit": crit,
+            "botch": botch,
+        }
+
+    @property
+    def check_string(self) -> str:
+        if self.skill:
+            return f"{self.stat} and {self.skill} at {self.rating}"
+        return f"{self.stat} at {self.rating}"
+
+    @property
+    def roll_prefix(self) -> str:
+        return f"{self.character} checks {self.check_string}."
+
+    @property
+    def roll_message(self) -> str:
+        return f"{self.roll_prefix} {self.result_message}"
 
 
 class DefinedRoll(SimpleRoll):
@@ -264,7 +261,7 @@ class DefinedRoll(SimpleRoll):
 
     @property
     def roll_prefix(self):
-        roll_message = f"{self.character} checks '{self.check}' at {self.rating}"
+        roll_message = f"{self.character} checks '{self.check}' at {self.rating}."
         return roll_message
 
 
@@ -362,24 +359,11 @@ class SpoofRoll(SimpleRoll):
             f"|c{self.character}|n GM checks {self.spoof_check_str} at {self.rating}."
         )
 
-    def announce_to_room(self):
-        notifier = RoomNotifier(
-            self.character,
-            self.character.location,
-            to_player=True,
-            to_gm=True,
-            to_staff=True,
-        )
-
-        notifier.generate()
-
-        # Build message.
-        if not self.npc_name:
-            msg = f"{self.no_npc_roll_prefix} {self.result_message}"
-        else:
-            msg = f"{self.spoof_roll_prefix} {self.result_message}"
-
-        notifier.notify(msg, options={"roll": True})
+    @property
+    def roll_message(self):
+        if self.npc_name:
+            return f"{self.spoof_roll_prefix} {self.result_message}"
+        return f"{self.no_npc_roll_prefix} {self.result_message}"
 
     def _get_fail_rolls(self):
         rolls = RollResult.get_all_cached_instances()
@@ -389,13 +373,7 @@ class SpoofRoll(SimpleRoll):
             return [obj for obj in rolls if obj.value < 0]
 
     def get_context(self) -> dict:
-        crit = None
-        botch = None
-        if self.natural_roll_type:
-            if self.natural_roll_type.is_crit:
-                crit = self.natural_roll_type
-            else:
-                botch = self.natural_roll_type
+        crit, botch = self._get_context_crit_botch()
 
         if self.npc_name:
             name = self.npc_name
@@ -413,10 +391,9 @@ class SpoofRoll(SimpleRoll):
 
 
 class RetainerRoll(SimpleRoll):
-    def __init__(self, character, receivers, retainer, stat, skill, rating, **kwargs):
+    def __init__(self, character, retainer, stat, skill, rating, **kwargs):
         super().__init__(
             character=character,
-            receivers=receivers,
             stat=stat,
             skill=skill,
             rating=rating,
@@ -424,24 +401,6 @@ class RetainerRoll(SimpleRoll):
         )
 
         self.retainer = retainer
-
-    def execute(self):
-        self.raw_roll = randint(1, 100)
-
-        # Get retainer's roll values; they don't have knacks
-        # so those are ignored here.
-        stat_val = self.get_roll_value_for_stat()
-        skill_val = self.get_roll_value_for_skill()
-        rating_val = self.get_roll_value_for_rating()
-
-        self.result_value = self.raw_roll + stat_val + skill_val - rating_val
-
-        self.natural_roll_type = self.check_for_crit_or_botch()
-        self.roll_result_object = RollResult.get_instance_for_roll(
-            self.result_value, natural_roll_type=self.natural_roll_type
-        )
-
-        self.result_message = self.roll_result_object.render(**self.get_context())
 
     def get_roll_value_for_stat(self) -> int:
         if not self.stat:
@@ -458,47 +417,12 @@ class RetainerRoll(SimpleRoll):
         return StatWeight.get_weighted_value_for_skill(skill_val)
 
     @property
-    def check_string(self) -> str:
-        if self.skill:
-            return f"{self.stat} and {self.skill} at {self.rating}"
-        return f"{self.stat} at {self.rating}"
-
-    @property
     def roll_prefix(self) -> str:
-        return f"{self.character}'s retainer ({self.retainer.pretty_name}|n) checks {self.check_string}"
-
-    def announce_to_room(self):
-        notifier = RoomNotifier(
-            self.character,
-            self.character.location,
-            to_player=True,
-            to_gm=True,
-            to_staff=True,
-        )
-
-        notifier.generate()
-        notifier.notify(self.roll_message, options={"roll": True})
+        return f"{self.character}'s retainer ({self.retainer.pretty_name}|n) checks {self.check_string}."
 
     def get_context(self) -> dict:
-        crit = None
-        botch = None
-        if self.natural_roll_type:
-            if self.natural_roll_type.is_crit:
-                crit = self.natural_roll_type
-            else:
-                botch = self.natural_roll_type
-
-        try:
-            if self.retainer.name.count(",") >= 1:
-                short_name = self.retainer.name.split(",", 1)
-                short_name = short_name[0].strip()
-            elif self.retainer.name.count("-") >= 1:
-                short_name = self.retainer.name.split("-", 1)
-                short_name = short_name[0].strip()
-            else:
-                short_name = self.retainer.name
-        except (ValueError, IndexError):
-            short_name = self.retainer.name
+        crit, botch = self._get_context_crit_botch()
+        short_name = self.__split_retainer_name(self.retainer.name)
 
         return {
             "character": short_name,
@@ -508,6 +432,21 @@ class RetainerRoll(SimpleRoll):
             "crit": crit,
             "botch": botch,
         }
+
+    def __split_retainer_name(self, name: str) -> str:
+        try:
+            if name.count(",") >= 1:
+                short_name = name.split(",", 1)
+                short_name = short_name[0].strip()
+            elif name.count("-") >= 1:
+                short_name = name.split("-", 1)
+                short_name = short_name[0].strip()
+            else:
+                short_name = name
+        except (ValueError, IndexError):
+            short_name = name
+
+        return short_name
 
 
 class BaseCheckMaker:
@@ -528,31 +467,93 @@ class BaseCheckMaker:
     def make_check_and_announce(self):
         self.roll = self.roll_class(character=self.character, **self.kwargs)
         self.roll.execute()
-        self.roll.announce_to_room()
+        self.announce()
 
     @property
     def is_success(self):
         return self.roll.is_success
 
+    def announce(self):
+        notifier = RoomNotifier(
+            self.character,
+            room=self.character.location,
+            to_player=True,
+            to_gm=True,
+            to_staff=True,
+        )
+
+        notifier.generate()
+        notifier.notify(self.roll.roll_message, options={"roll": True})
+
 
 class PrivateCheckMaker:
     roll_class = SimpleRoll
 
-    def __init__(self, character, roll_class=None, **kwargs):
+    def __init__(self, character, receivers, roll_class=None, **kwargs):
         self.character = character
+        self.receivers = receivers or []
         self.kwargs = kwargs
         if roll_class:
             self.roll_class = roll_class
+        self.roll = None
 
     @classmethod
-    def perform_check_for_character(cls, character, **kwargs):
-        check = cls(character, **kwargs)
+    def perform_check_for_character(cls, character, receivers, **kwargs):
+        check = cls(character=character, receivers=receivers, **kwargs)
         check.make_check_and_announce()
 
     def make_check_and_announce(self):
-        roll = self.roll_class(character=self.character, **self.kwargs)
-        roll.execute()
-        roll.announce_to_players()
+        self.roll = self.roll_class(character=self.character, **self.kwargs)
+        self.roll.execute()
+        self.announce()
+
+    def announce(self):
+        """
+        Sends a private roll result message to specific players as well as
+        to all GMs (player and staff) at that character's location.
+        """
+        # Notifiers will source nothing if self.character.location is None
+        # or if self.receivers is None.
+        # They will have empty receiver lists, and thus not do anything.
+
+        # SelfListNotifier will notify the caller if a player or
+        # player GM, and notify every player/player-GM on the list.
+        player_notifier = SelfListNotifier(
+            self.character,
+            receivers=self.receivers,
+            to_player=True,
+            to_gm=True,
+        )
+        # RoomNotifier will notify every staff member in the room
+        staff_notifier = RoomNotifier(
+            self.character,
+            room=self.character.location,
+            to_staff=True,
+        )
+
+        # Generate the receivers of the notifications.
+        player_notifier.generate()
+        staff_notifier.generate()
+
+        # Staff names get highlighted because they're fancy
+        staff_names = [f"|c{name}|n" for name in sorted(staff_notifier.receiver_names)]
+
+        # Build list of who is receiving this private roll.  Staff are last
+        receiver_names = sorted(player_notifier.receiver_names) + staff_names
+
+        # If only the caller is here to see it, only the caller will be
+        # listed for who saw it.
+        if receiver_names:
+            receiver_suffix = f"(Shared with: {', '.join(receiver_names)})"
+        else:
+            receiver_suffix = f"(Shared with: {self.character})"
+
+        # Now that we know who is getting it, build the private message string.
+        private_msg = f"|w[Private Roll]|n {self.roll.roll_message} {receiver_suffix}"
+
+        # Notify everyone of the roll result.
+        player_notifier.notify(private_msg, options={"roll": True})
+        staff_notifier.notify(private_msg, options={"roll": True})
 
 
 class RollResults:
