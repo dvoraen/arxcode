@@ -512,30 +512,12 @@ class BaseCheckMaker:
         notifier.notify(self.roll.roll_message, options={"roll": True})
 
 
-class PrivateCheckMaker:
+class PrivateCheckMaker(BaseCheckMaker):
     roll_class = SimpleRoll
 
-    def __init__(self, character, receivers, roll_class=None, **kwargs):
-        self.character = character
+    def __init__(self, character, receivers=None, roll_class=None, **kwargs):
+        super().__init__(character, roll_class, **kwargs)
         self.receivers = receivers or []
-        self.kwargs = kwargs
-        if roll_class:
-            self.roll_class = roll_class
-        self.roll = None
-
-    @classmethod
-    def perform_check_for_character(cls, character, receivers, **kwargs):
-        check = cls(character=character, receivers=receivers, **kwargs)
-        check.make_check_and_announce()
-
-    def make_check_and_announce(self):
-        self.roll = self.roll_class(character=self.character, **self.kwargs)
-        self.roll.execute()
-        self.announce()
-
-    @property
-    def is_success(self) -> bool:
-        return self.roll.is_success
 
     def announce(self):
         """
