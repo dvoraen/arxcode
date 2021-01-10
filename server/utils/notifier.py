@@ -74,7 +74,8 @@ class Notifier(ABC):
         self.receiver_set = set()
 
     def __repr__(self):
-        return f"<Notifier: {self.to_flags}>"
+        keys = [key for key in self.to_flags if self.to_flags[key]]
+        return f"<Notifier: {', '.join(keys)}>"
 
     def generate(self):
         """Generates the receiver list for this notifier."""
@@ -147,7 +148,8 @@ class DomainNotifier(Notifier):
         self.domain = domain
 
     def __repr__(self):
-        return f"<DomainNotifier: {self.domain}; {self.to_flags}>"
+        keys = [key for key in self.to_flags if self.to_flags[key]]
+        return f"<DomainNotifier: {self.domain}; {', '.join(keys)}>"
 
     def _source_characters(self):
         # Grab all the rulers of the domain or just the one?
@@ -189,7 +191,9 @@ class ListNotifier(Notifier):
         self.receiver_list = receivers or []
 
     def __repr__(self):
-        return f"<ListNotifier: {self.receiver_list}; {self.to_flags}>"
+        keys = [key for key in self.to_flags if self.to_flags[key]]
+        receivers = [name for name in self.receiver_list]
+        return f"<ListNotifier: {', '.join(receivers)}; {', '.join(keys)}>"
 
     def _source_characters(self):
         # Source the receivers on the list.
@@ -229,11 +233,12 @@ class OrgNotifier(Notifier):
         self.ranks = ranks or []
 
     def __repr__(self):
-        return f"<OrgNotifier: {self.org}; {self.to_flags}>"
+        keys = [key for key in self.to_flags if self.to_flags[key]]
+        return f"<OrgNotifier: {self.org}; {', '.join(keys)}>"
 
     def notify(self, msg: str, options: Optional[OptionsDict] = None):
         # How an organization is notified matters if it's a secret
-        # organization.  Thus, override.
+        # organization.  Thus, overload.
         pass
 
     def _source_characters(self):
@@ -278,7 +283,8 @@ class RoomNotifier(Notifier):
         self.room = room
 
     def __repr__(self):
-        return f"<RoomNotifier: {self.room}; {self.to_flags}>"
+        keys = [key for key in self.to_flags if self.to_flags[key]]
+        return f"<RoomNotifier: {self.room}; {', '.join(keys)}>"
 
     def _source_characters(self):
         """
