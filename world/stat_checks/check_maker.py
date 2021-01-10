@@ -13,6 +13,36 @@ from world.stat_checks.models import (
 from server.utils.notifier import RoomNotifier, SelfListNotifier
 
 
+"""
+RawRoll / SimpleRoll public interface
+
+=======
+METHODS
+=======
+
+execute()
+- get_roll_value_for traits()
+    - get_roll_value_for_stat()
+    - get_roll_value_for_skill()
+- get_roll_value_for_rating()
+- check_for_crit_or_botch()
+- get_roll_value_for_knack()
+- get_context()
+
+==========
+PROPERTIES
+==========
+
+is_crit
+is_botch
+is_success
+
+roll_message
+- roll_prefix
+    - check_string
+"""
+
+
 TIE_THRESHOLD = 5
 
 
@@ -28,11 +58,11 @@ def get_check_string(stat, skill, rating) -> str:
     return f"{stat} at {rating}"
 
 
-class RawRoll:
+class BaseRoll:
     """
-    A RawRoll is a die roll of a given stat (and skill if applicable)
-    that is modified only by a knack for it, and with determination
-    of being a crit/botch.
+    A BaseRoll is a die roll of a given stat (and skill if applicable)
+    that is modified only by a knack for it, and it determines whether
+    the roll is a crit/botch.
 
     Modifications to the roll due to difficulty rating and other
     factors are done in subclasses.
@@ -55,18 +85,6 @@ class RawRoll:
 
         # Was it a crit, botch, or neither?
         self.natural_roll_type = self.check_for_crit_or_botch()
-
-    @property
-    def is_crit(self) -> bool:
-        if not self.natural_roll_type:
-            return False
-        return self.natural_roll_type.is_crit
-
-    @property
-    def is_botch(self) -> bool:
-        if not self.natural_roll_type:
-            return False
-        return self.natural_roll_type.is_botch
 
     def get_roll_value_for_traits(self) -> int:
         stat_value = self.get_roll_value_for_stat()
@@ -117,10 +135,22 @@ class RawRoll:
 
         return {
             "character": self.character,
-            "value": self.full_roll,
+            "roll": self.full_roll,
             "crit": crit,
             "botch": botch,
         }
+
+    @property
+    def is_crit(self) -> bool:
+        if not self.natural_roll_type:
+            return False
+        return self.natural_roll_type.is_crit
+
+    @property
+    def is_botch(self) -> bool:
+        if not self.natural_roll_type:
+            return False
+        return self.natural_roll_type.is_botch
 
     def _get_context_crit_botch(self):
         crit = None
@@ -135,7 +165,7 @@ class RawRoll:
 
 
 @total_ordering
-class SimpleRoll(RawRoll):
+class SimpleRoll(BaseRoll):
     def __init__(
         self,
         character=None,
@@ -185,10 +215,6 @@ class SimpleRoll(RawRoll):
         )
         self.result_message = self.roll_result_object.render(**self.get_context())
 
-    @property
-    def is_success(self):
-        return self.roll_result_object.is_success
-
     def get_roll_value_for_rating(self):
         return self.rating.value
 
@@ -203,6 +229,10 @@ class SimpleRoll(RawRoll):
             "crit": crit,
             "botch": botch,
         }
+
+    @property
+    def is_success(self):
+        return self.roll_result_object.is_success
 
     @property
     def check_string(self) -> str:
@@ -309,7 +339,7 @@ class SpoofRoll(SimpleRoll):
         else:
             self.natural_roll_type = None
 
-        # If the result is a flub, get the failed roll objects and pick one
+        # If the roll is a flub, get the failed roll objects and pick one
         # at random for our resulting roll.
         if self.is_flub:
             fail_rolls = self.__get_fail_rolls()
@@ -334,43 +364,13 @@ class SpoofRoll(SimpleRoll):
 
         return StatWeight.get_weighted_value_for_skill(self.skill_value)
 
-    @property
-    def spoof_check_string(self) -> str:
-        if self.skill:
-            return f"{self.stat} ({self.stat_value}) and {self.skill} ({self.skill_value}) at {self.rating}"
-        return f"{self.stat} ({self.stat_value}) at {self.rating}"
-
-    @property
-    def nospoof_check_string(self) -> str:
-        if self.skill:
-            return f"{self.stat} and {self.skill} at {self.rating}"
-        return f"{self.stat} at {self.rating}"
-
-    @property
-    def npc_roll_prefix(self) -> str:
-        return f"{self.character} GM checks |c{self.npc_name}'s|n {self.spoof_check_string}."
-
-    @property
-    def nospoof_npc_roll_prefix(self) -> str:
-        return f"{self.character} GM checks |c{self.npc_name}'s|n {self.nospoof_check_string}."
-
-    @property
-    def no_npc_roll_prefix(self) -> str:
-        return f"|c{self.character}|n GM checks {self.spoof_check_string}."
-
-    @property
-    def roll_message(self) -> str:
-        if self.npc_name:
-            return f"{self.npc_roll_prefix} {self.result_message}"
-        return f"{self.no_npc_roll_prefix} {self.result_message}"
-
     def get_context(self) -> dict:
         crit, botch = self._get_context_crit_botch()
 
         if self.npc_name:
             name = self.npc_name
         else:
-            name = str(self.character)
+            name = self.character
 
         return {
             "character": name,
@@ -387,6 +387,26 @@ class SpoofRoll(SimpleRoll):
             return RollResult.objects.filter(value__lt=0)
         else:
             return [obj for obj in rolls if obj.value < 0]
+
+    @property
+    def spoof_check_string(self) -> str:
+        if self.skill:
+            return f"{self.stat} ({self.stat_value}) and {self.skill} ({self.skill_value}) at {self.rating}"
+        return f"{self.stat} ({self.stat_value}) at {self.rating}"
+
+    @property
+    def npc_roll_prefix(self) -> str:
+        return f"{self.character} GM checks |c{self.npc_name}'s|n {self.spoof_check_string}."
+
+    @property
+    def roll_prefix(self) -> str:
+        return f"|c{self.character}|n GM checks {self.spoof_check_string}."
+
+    @property
+    def roll_message(self) -> str:
+        if self.npc_name:
+            return f"{self.npc_roll_prefix} {self.result_message}"
+        return f"{self.roll_prefix} {self.result_message}"
 
 
 class RetainerRoll(SimpleRoll):
@@ -415,13 +435,9 @@ class RetainerRoll(SimpleRoll):
         skill_val = self.retainer.dbobj.traits.get_skill_value(self.skill)
         return StatWeight.get_weighted_value_for_skill(skill_val)
 
-    @property
-    def roll_prefix(self) -> str:
-        return f"{self.character}'s retainer ({self.retainer.pretty_name}|n) checks {self.check_string}."
-
     def get_context(self) -> dict:
         crit, botch = self._get_context_crit_botch()
-        short_name = self.__split_retainer_name(self.retainer.name)
+        short_name = self.__split_retainer_name()
 
         return {
             "character": short_name,
@@ -432,18 +448,22 @@ class RetainerRoll(SimpleRoll):
             "botch": botch,
         }
 
-    def __split_retainer_name(self, name: str) -> str:
+    @property
+    def roll_prefix(self) -> str:
+        return f"{self.character}'s retainer ({self.retainer.pretty_name}|n) checks {self.check_string}."
+
+    def __split_retainer_name(self) -> str:
         try:
-            if name.count(",") >= 1:
-                short_name = name.split(",", 1)
+            if self.retainer.name.count(",") >= 1:
+                short_name = self.retainer.name.split(",", 1)
                 short_name = short_name[0].strip()
-            elif name.count("-") >= 1:
-                short_name = name.split("-", 1)
+            elif self.retainer.name.count("-") >= 1:
+                short_name = self.retainer.name.split("-", 1)
                 short_name = short_name[0].strip()
             else:
-                short_name = name
+                short_name = self.retainer.name
         except (ValueError, IndexError):
-            short_name = name
+            short_name = self.retainer.name
 
         return short_name
 
@@ -505,6 +525,10 @@ class PrivateCheckMaker:
         self.roll = self.roll_class(character=self.character, **self.kwargs)
         self.roll.execute()
         self.announce()
+
+    @property
+    def is_success(self) -> bool:
+        return self.roll.is_success
 
     def announce(self):
         """
