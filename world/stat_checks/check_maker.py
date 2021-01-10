@@ -13,34 +13,32 @@ from world.stat_checks.models import (
 from server.utils.notifier import RoomNotifier, SelfListNotifier
 
 
-"""
-RawRoll / SimpleRoll public interface
+# RawRoll / SimpleRoll public interface
+# (reference of calls for overloading)
+# =======
+# METHODS
+# =======
 
-=======
-METHODS
-=======
+# execute()
+# - get_roll_value_for traits()
+#     - get_roll_value_for_stat()
+#     - get_roll_value_for_skill()
+# - get_roll_value_for_rating()
+# - check_for_crit_or_botch()
+# - get_roll_value_for_knack()
+# - get_context()
 
-execute()
-- get_roll_value_for traits()
-    - get_roll_value_for_stat()
-    - get_roll_value_for_skill()
-- get_roll_value_for_rating()
-- check_for_crit_or_botch()
-- get_roll_value_for_knack()
-- get_context()
+# ==========
+# PROPERTIES
+# ==========
 
-==========
-PROPERTIES
-==========
+# is_crit
+# is_botch
+# is_success
 
-is_crit
-is_botch
-is_success
-
-roll_message
-- roll_prefix
-    - check_string
-"""
+# roll_message
+# - roll_prefix
+#     - check_string
 
 
 TIE_THRESHOLD = 5
@@ -68,7 +66,7 @@ class BaseRoll:
     factors are done in subclasses.
     """
 
-    def __init__(self, character, stat: str = None, skill: str = None):
+    def __init__(self, character=None, stat: str = None, skill: str = None):
         self.character = character
         self.stat = stat
         self.skill = skill
@@ -77,16 +75,17 @@ class BaseRoll:
         self.natural_roll_type: NaturalRollType = None
 
     def execute(self):
+        """Generates the unmodified base roll."""
         self.raw_roll = randint(1, 100)
         traits_value = self.get_roll_value_for_traits()
         knack_value = self.get_roll_value_for_knack()
 
         self.full_roll = self.raw_roll + traits_value + knack_value
 
-        # Was it a crit, botch, or neither?
         self.natural_roll_type = self.check_for_crit_or_botch()
 
     def get_roll_value_for_traits(self) -> int:
+        """Returns the total for stat and skill contribution to this roll."""
         stat_value = self.get_roll_value_for_stat()
         skill_value = self.get_roll_value_for_skill()
 
@@ -178,10 +177,10 @@ class SimpleRoll(BaseRoll):
         super().__init__(character, stat, skill)
 
         self.rating = rating
-        self.result_value = None
+        self.result_value: int = None
         self.result_message = None
         self.room = character and character.location
-        self.roll_result_object = None
+        self.roll_result_object: RollResult = None
         self.tie_threshold = tie_threshold
         self.roll_kwargs = kwargs
 
@@ -215,7 +214,7 @@ class SimpleRoll(BaseRoll):
         )
         self.result_message = self.roll_result_object.render(**self.get_context())
 
-    def get_roll_value_for_rating(self):
+    def get_roll_value_for_rating(self) -> int:
         return self.rating.value
 
     def get_context(self) -> dict:
@@ -231,7 +230,7 @@ class SimpleRoll(BaseRoll):
         }
 
     @property
-    def is_success(self):
+    def is_success(self) -> bool:
         return self.roll_result_object.is_success
 
     @property
@@ -301,12 +300,12 @@ class DefinedRoll(SimpleRoll):
 class SpoofRoll(SimpleRoll):
     def __init__(
         self,
-        character,
-        stat: str,
-        stat_value: int,
-        skill: str,
-        skill_value: int,
-        rating: str,
+        character=None,
+        stat: str = None,
+        stat_value: int = 0,
+        skill: str = None,
+        skill_value: int = 0,
+        rating: DifficultyRating = None,
         npc_name: str = None,
         **kwargs,
     ):
@@ -410,7 +409,15 @@ class SpoofRoll(SimpleRoll):
 
 
 class RetainerRoll(SimpleRoll):
-    def __init__(self, character, retainer, stat, skill, rating, **kwargs):
+    def __init__(
+        self,
+        character=None,
+        retainer=None,
+        stat: str = None,
+        skill: str = None,
+        rating: DifficultyRating = None,
+        **kwargs,
+    ):
         super().__init__(
             character=character,
             stat=stat,
@@ -422,14 +429,14 @@ class RetainerRoll(SimpleRoll):
         self.retainer = retainer
 
     def get_roll_value_for_stat(self) -> int:
-        if not self.stat:
+        if not self.stat or not self.retainer:
             return 0
 
         stat_val = self.retainer.dbobj.traits.get_stat_value(self.stat)
         return StatWeight.get_weighted_value_for_stat(stat_val, not self.skill)
 
     def get_roll_value_for_skill(self) -> int:
-        if not self.skill:
+        if not self.skill or not self.retainer:
             return 0
 
         skill_val = self.retainer.dbobj.traits.get_skill_value(self.skill)
