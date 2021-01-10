@@ -70,7 +70,8 @@ class TestCheckCommands(ArxCommandTest):
             name="intelligence", trait_type=Trait.STAT, category=Trait.MENTAL
         )
 
-    def test_stat_check_cmd_normal(self, mock_randint):
+    @patch("server.utils.notifier.RoomNotifier.notify")
+    def test_stat_check_cmd_normal(self, mock_notify, mock_randint):
         # test help message fetches Difficulty Ratings from lookup table
         help_msg = self.instance.get_help(None, None)
         self.assertIn("easy", help_msg)
@@ -82,28 +83,28 @@ class TestCheckCommands(ArxCommandTest):
         # check that a normal roll works
         mock_randint.return_value = 25
         self.call_cmd("dex at normal", "")
-        self.char1.msg_location_or_contents.assert_called_with(
+        mock_notify.assert_called_with(
             f"{self.char1} checks dex at {self.normal}. {self.char1} rolls marginal.",
             options=self.options,
         )
         # check that we can trigger a higher value result
         self.char1.traits.set_stat_value("dex", 5)
         self.call_cmd("dex at easy", "")
-        self.char1.msg_location_or_contents.assert_called_with(
+        mock_notify.assert_called_with(
             f"{self.char1} checks dex at {self.easy}. {self.char1} rolls okay.",
             options=self.options,
         )
         # check a crit
         mock_randint.return_value = 99
         self.call_cmd("dex at normal", "")
-        self.char1.msg_location_or_contents.assert_called_with(
+        mock_notify.assert_called_with(
             f"{self.char1} checks dex at {self.normal}. Crit! {self.char1} rolls a crit yay!!!!.",
             options=self.options,
         )
         # check a botch
         mock_randint.return_value = 1
         self.call_cmd("dex at normal", "")
-        self.char1.msg_location_or_contents.assert_called_with(
+        mock_notify.assert_called_with(
             f"{self.char1} checks dex at {self.normal}. Botch! {self.char1} rolls a botch - boo!!!.",
             options=self.options,
         )
