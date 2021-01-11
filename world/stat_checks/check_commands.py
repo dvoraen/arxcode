@@ -62,16 +62,14 @@ class CmdStatCheck(ArxCommand):
         stat, skill, rating = self.get_check_values_from_args(
             self.args, "Usage: stat [+ skill] at <difficulty rating>"
         )
-        BaseCheckMaker.perform_check_for_character(
-            self.caller, stat=stat, skill=skill, rating=rating
-        )
+        BaseCheckMaker.perform_check(self.caller, stat=stat, skill=skill, rating=rating)
 
     def do_private_check(self):
         stat, skill, rating = self.get_check_values_from_args(
             self.lhs,
             "Usage: stat [+ skill] at <difficulty rating>[=<player1>,<player2>,etc.]",
         )
-        PrivateCheckMaker.perform_check_for_character(
+        PrivateCheckMaker.perform_check(
             self.caller, stat=stat, skill=skill, rating=rating, receivers=self.rhslist
         )
 
@@ -86,7 +84,7 @@ class CmdStatCheck(ArxCommand):
             raise self.error_class("Your retainer must be in the room with you.")
 
         if not self.rhslist:
-            BaseCheckMaker.perform_check_for_character(
+            BaseCheckMaker.perform_check(
                 character=self.caller,
                 receivers=None,
                 roll_class=RetainerRoll,
@@ -96,7 +94,7 @@ class CmdStatCheck(ArxCommand):
                 rating=rating,
             )
         else:
-            PrivateCheckMaker.perform_check_for_character(
+            PrivateCheckMaker.perform_check(
                 character=self.caller,
                 receivers=self.rhslist,
                 roll_class=RetainerRoll,
@@ -182,9 +180,8 @@ class CmdStatCheck(ArxCommand):
             stat, skill, rating = self.get_check_values_from_args(
                 self.rhs, "Usage: stat [+ skill] at <difficulty rating>"
             )
-        prefix = f"{self.caller} has called for a check of {get_check_string(stat, skill, rating)}."
-        ContestedCheckMaker.perform_contested_check(
-            characters, self.caller, prefix, stat=stat, skill=skill, rating=rating
+        ContestedCheckMaker.perform_check(
+            self.caller, rollers=characters, stat=stat, skill=skill, rating=rating
         )
 
     def do_opposing_checks(self):
@@ -331,7 +328,7 @@ class CmdSpoofCheck(ArxCommand):
         can_crit = "crit" in self.switches
         is_flub = "flub" in self.switches
 
-        BaseCheckMaker.perform_check_for_character(
+        BaseCheckMaker.perform_check(
             self.caller,
             roll_class=SpoofRoll,
             stat=stat,
@@ -344,7 +341,7 @@ class CmdSpoofCheck(ArxCommand):
             is_flub=is_flub,
         )
 
-    def _extract_difficulty(self, args: str, syntax: str) -> (str, DifficultyRating):
+    def _extract_difficulty(self, args: str, syntax: str):
         try:
             lhs, rhs, *remainder = args.split(" at ")
         except ValueError:
@@ -360,7 +357,7 @@ class CmdSpoofCheck(ArxCommand):
 
         return lhs, difficulty
 
-    def _extract_stat_skill_string(self, args: str, syntax: str) -> (str, str):
+    def _extract_stat_skill_string(self, args: str, syntax: str):
         # If syntax error on stat only
         if args.count("+") == 0 and args.count("/") != 1:
             raise self.error_class(syntax)
@@ -383,7 +380,7 @@ class CmdSpoofCheck(ArxCommand):
 
         return stat_str, skill_str
 
-    def _get_values(self, args: str) -> (str, int):
+    def _get_values(self, args: str):
         try:
             lhs, rhs = args.split("/")
         except ValueError:

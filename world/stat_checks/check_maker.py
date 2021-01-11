@@ -56,6 +56,14 @@ def get_check_string(stat, skill, rating) -> str:
     return f"{stat} at {rating}"
 
 
+def get_fail_rolls():
+    rolls = RollResult.get_all_cached_instances()
+    if not rolls:
+        return RollResult.objects.filter(value__lt=0)
+    else:
+        return [obj for obj in rolls if obj.value < 0]
+
+
 class BaseRoll:
     """
     A BaseRoll is a die roll of a given stat (and skill if applicable)
@@ -341,7 +349,7 @@ class SpoofRoll(SimpleRoll):
         # If the roll is a flub, get the failed roll objects and pick one
         # at random for our resulting roll.
         if self.is_flub:
-            fail_rolls = self.__get_fail_rolls()
+            fail_rolls = get_fail_rolls()
             self.roll_result_object = choice(fail_rolls)
         else:
             self.roll_result_object = RollResult.get_instance_for_roll(
@@ -379,13 +387,6 @@ class SpoofRoll(SimpleRoll):
             "crit": crit,
             "botch": botch,
         }
-
-    def __get_fail_rolls(self):
-        rolls = RollResult.get_all_cached_instances()
-        if not rolls:
-            return RollResult.objects.filter(value__lt=0)
-        else:
-            return [obj for obj in rolls if obj.value < 0]
 
     @property
     def spoof_check_string(self) -> str:
@@ -475,6 +476,14 @@ class RetainerRoll(SimpleRoll):
         return short_name
 
 
+# CheckMaker Methods
+
+# perform_check()
+# - make_check_and_announce()
+#     - roll.execute()
+#     - announce()
+
+
 class BaseCheckMaker:
     roll_class = SimpleRoll
 
@@ -486,7 +495,7 @@ class BaseCheckMaker:
         self.roll = None
 
     @classmethod
-    def perform_check_for_character(cls, character, **kwargs):
+    def perform_check(cls, character, **kwargs):
         check = cls(character, **kwargs)
         check.make_check_and_announce()
 
@@ -605,31 +614,36 @@ class RollResults:
         return self.get_result_string()
 
 
-class ContestedCheckMaker:
+class ContestedCheckMaker(BaseCheckMaker):
     roll_class = SimpleRoll
 
-    def __init__(self, characters, caller, prefix_string="", roll_class=None, **kwargs):
-        self.characters = list(characters)
-        self.caller = caller
-        self.kwargs = kwargs
-        self.prefix_string = prefix_string
-        if roll_class:
-            self.roll_class = roll_class
+    def __init__(self, character, rollers, roll_class=None, **kwargs):
+        super().__init__(character, roll_class, **kwargs)
+        self.rollers = list(rollers)
 
-    @classmethod
-    def perform_contested_check(cls, characters, caller, prefix_string, **kwargs):
-        obj = cls(characters, caller, prefix_string, **kwargs)
-        obj.perform_contested_check_and_announce()
+        self.rolls = []
 
-    def perform_contested_check_and_announce(self):
-        rolls = []
-        for character in self.characters:
-            roll = self.roll_class(character=character, **self.kwargs)
+    def make_check_and_announce(self):
+        for roller in self.rollers:
+            roll = self.roll_class(roller, **self.kwargs)
             roll.execute()
-            rolls.append(roll)
-        results = RollResults(rolls).rank_results_and_get_display()
-        roll_message = f"{self.prefix_string}\n{results}"
-        self.caller.msg_location_or_contents(roll_message, options={"roll": True})
+            self.rolls.append(roll)
+        self.announce()
+
+    def announce(self):
+        caller = self.character
+
+        # Extracting from the dictionary this way so that stat/skill/rating
+        # get passed to their roll_class via kwargs, i.e. - without needing
+        # any extra consideration in the argument lists.
+        stat = self.kwargs.get("stat", None)
+        skill = self.kwargs.get("skill", None)
+        rating = self.kwargs.get("rating", None)
+
+        prefix = f"{caller} has called for a check of {get_check_string(stat, skill, rating)}."
+        results = RollResults(self.rolls).rank_results_and_get_display()
+        roll_message = f"{prefix}\n{results}"
+        caller.msg_location_or_contents(roll_message, options={"roll": True})
 
 
 class OpposingRolls:
