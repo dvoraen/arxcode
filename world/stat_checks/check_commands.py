@@ -156,8 +156,6 @@ class CmdStatCheck(ArxCommand):
         return stat, skill
 
     def do_contested_check(self):
-        if not self.caller.check_staff_or_gm():
-            raise self.error_class("You are not GMing an event in this room.")
         characters = []
         if "here" in self.switches:
             characters = [
