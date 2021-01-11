@@ -1794,6 +1794,7 @@ class CmdListRevelations(ArxPlayerCommand):
     """
 
     key = "@revelations"
+    aliases = ["@revelation"]
     locks = "cmd:all()"
     help_category = "Information"
 
