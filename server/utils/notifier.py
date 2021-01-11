@@ -153,18 +153,19 @@ class DomainNotifier(Notifier):
 
     def _source_characters(self):
         # Grab all the rulers of the domain or just the one?
-        self._source_rulers()
+        self.__source_rulers()
 
         if self.to_flags.get("to_staff", False):
-            self._source_staff()
+            self.__source_staff()
 
         if self.to_flags.get("to_caller", False):
             self.receiver_set.add(self.caller)
 
-    def _source_rulers(self):
+    def __source_rulers(self):
         pass
 
-    def _source_staff(self):
+    def __source_staff(self):
+        # Need to find different way to poll staff.
         staff_qs = AccountDB.objects.filter(db_is_connected=True, is_staff=True)
         for staff in staff_qs:
             self.receiver_set.add(staff)
@@ -181,7 +182,7 @@ class ListNotifier(Notifier):
     - to_staff - include staff in this notification
 
     - to_global - sources players on the list from anywhere in the game
-                  if false, sources from the same room as self.character
+        if false, sources from the same room as self.character
     - to_caller - sources the caller in this notification (if applicable)
     """
 
