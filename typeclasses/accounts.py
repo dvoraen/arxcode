@@ -190,25 +190,46 @@ class Account(InformMixin, MsgMixins, DefaultAccount):
         """Lets us know if we have unread informs"""
         msg = ""
         try:
-            unread = self.informs.filter(read_by__isnull=True).count()
+            unread = self.__get_unread_informs(self.informs)
             if unread:
-                msg += (
-                    "{w*** You have %s unread informs. Use @informs to read them. ***{n\n"
-                    % unread
-                )
+                msg += f"|w*** You have {len(unread)} unread informs. Use @informs to read them. (#{', #'.join(unread)}) ***|n\n"
             for org in self.current_orgs:
                 if not org.access(self, "informs"):
                     continue
-                unread = org.informs.exclude(read_by=self).count()
+                unread = self.__get_unread_org_informs(org.informs)
                 if unread:
-                    msg += "{w*** You have %s unread informs for %s. ***{n\n" % (
-                        unread,
-                        org,
-                    )
+                    msg += f"|w*** You have {len(unread)} unread informs for {org}. (#{', #'.join(unread)}) ***|n\n"
         except Exception:
             pass
         if msg:
             self.msg(msg)
+
+    def __get_unread_informs(self, informs) -> list:
+        all_informs = self.informs.all()
+        read_informs = informs.filter(read_by__isnull=False)
+        result = []
+
+        index = 0
+        for inform in all_informs:
+            index += 1
+            if inform in read_informs:
+                continue
+            result.append(str(index))
+
+        return result
+
+    def __get_unread_org_informs(self, org_informs) -> list:
+        all_informs = org_informs.all()
+        unread_informs = org_informs.exclude(read_by=self)
+        result = []
+
+        index = 0
+        for inform in all_informs:
+            index += 1
+            if inform in unread_informs:
+                result.append(str(index))
+
+        return result
 
     def is_guest(self):
         """
