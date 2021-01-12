@@ -177,12 +177,6 @@ class TestCheckCommands(ArxCommandTest):
     def test_stat_check_cmd_contest(self, mock_randint):
         self.add_character(3)
         self.add_character(4)
-        self.call(
-            self.instance,
-            "/contest",
-            "You are not GMing an event in this room.",
-            caller=self.char2,
-        )
         self.call_cmd(
             "/contest", "You must specify the names of characters for the contest."
         )
