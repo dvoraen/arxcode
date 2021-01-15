@@ -219,48 +219,40 @@ class ListNotifier(Notifier):
 class OrgNotifier(Notifier):
     """
     Notifier for sending to members of an organization, based
-    on passed in ranks.
+    on (optionally) passed in ranks.
 
     TO_FLAGS Supported:
-    - to_staff - include staff in this notification
-    - to_caller - source the caller in this notification
-    - to_ranks - source characters only from the provided list of ranks
+    - to_ranks - filter characters using the provided list of ranks
     """
 
-    def __init__(self, caller, org, ranks: List[int] = None, **to_flags):
+    def __init__(self, caller, org, ranks: Optional[List[int]] = None, **to_flags):
         super().__init__(caller, **to_flags)
 
         self.org = org
         self.ranks = ranks or []
+        self.member_set = set()
 
     def __repr__(self):
         keys = [key for key in self.to_flags if self.to_flags[key]]
         return f"<OrgNotifier: {self.org}; {', '.join(keys)}>"
 
-    def notify(self, msg: str, options: Optional[OptionsDict] = None):
-        # How an organization is notified matters if it's a secret
-        # organization.  Thus, overload.
-        pass
-
     def _source_characters(self):
-        # Source by rank if any ranks are being used for who will
-        # receive this notification.
+        # Source all online members.
+        self.member_set = {member for member in self.org.online_members}
+
+    def _filter_receivers(self):
         if self.to_flags.get("to_ranks", False):
-            self.__source_by_ranks()
+            self.__filter_by_ranks()
         else:
-            # Otherwise, grab all the online players.
-            self.__source_all_members()
+            self.receiver_set = {member.char for member in self.member_set}
 
-        # Source the caller in this notification.
-        if self.to_flags.get("to_caller", False):
-            self.receiver_set.add(self.caller)
+    def __filter_by_ranks(self):
+        if not self.ranks:
+            raise NotifyError("OrgNotifier: expected ranks; none supplied")
 
-    def __source_by_ranks(self):
-        pass
-
-    def __source_all_members(self):
-        for member in self.org.online_members():
-            self.receiver_set.add(member)
+        self.receiver_set = {
+            member.char for member in self.member_set if member.rank in self.ranks
+        }
 
 
 class RoomNotifier(Notifier):
@@ -293,10 +285,14 @@ class RoomNotifier(Notifier):
         in the given room.
         """
         if self.room is None:
-            raise NotifyError("expected room, received None")
+            raise NotifyError("RoomNotifier: expected room, received None")
 
         self.receiver_set = {char for char in self.room.contents if char.is_character}
 
 
 class ShardhavenNotifier(Notifier):
+    pass
+
+
+class StaffNotifier(Notifier):
     pass
