@@ -1,3 +1,5 @@
+from typing import Union
+
 from commands.base import ArxCommand
 from world.stat_checks.models import DifficultyRating, DamageRating
 from world.traits.models import Trait
@@ -9,6 +11,13 @@ from world.stat_checks.check_maker import (
     SpoofRoll,
     RetainerRoll,
     OpposingRolls,
+)
+from world.stat_checks.check_utils import (
+    get_check_string,
+    CheckStringError,
+    CheckString,
+    SpoofCheckString,
+    RetainerCheckString,
 )
 
 from world.dominion.models import Agent
@@ -58,28 +67,40 @@ class CmdStatCheck(ArxCommand):
             self.msg(err)
 
     def do_normal_check(self):
-        stat, skill, rating = self.get_check_values_from_args(
-            self.args, "Usage: stat [+ skill] at <difficulty rating>"
-        )
+        try:
+            check = CheckString(self.args)
+            check.parse()
+        except CheckStringError as error:
+            raise self.error_class(error) from None
+
         BaseCheckMaker.perform_check_for_character(
-            self.caller, stat=stat, skill=skill, rating=rating
+            self.caller, stat=check.stat, skill=check.skill, rating=check.rating
         )
 
     def do_private_check(self):
-        stat, skill, rating = self.get_check_values_from_args(
-            self.lhs,
-            "Usage: stat [+ skill] at <difficulty rating>[=<player1>,<player2>,etc.]",
-        )
+        try:
+            check = CheckString(self.lhs)
+            check.parse()
+        except CheckStringError as error:
+            raise self.error_class(error) from None
+
         PrivateCheckMaker.perform_check_for_character(
-            self.caller, stat=stat, skill=skill, rating=rating, receivers=self.rhslist
+            self.caller,
+            stat=check.stat,
+            skill=check.skill,
+            rating=check.rating,
+            receivers=self.rhslist,
         )
 
     def do_retainer_check(self):
-        syntax_error = "Usage: <id/name>/<stat> [+ <skill>] at <difficulty rating>"
+        try:
+            check = RetainerCheckString(self.lhs)
+            check.parse()
+        except CheckStringError as error:
+            raise self.error_class(error) from None
 
-        # Get retainer ID/name
-        args, retainer = self._get_retainer_from_args(self.lhs, syntax_error)
-        stat, skill, rating = self.get_check_values_from_args(args, syntax_error)
+        # Get retainer object
+        retainer = self._get_retainer_from_id(check.retainer_id)
 
         if retainer.dbobj.location != self.caller.location:
             raise self.error_class("Your retainer must be in the room with you.")
@@ -90,9 +111,9 @@ class CmdStatCheck(ArxCommand):
                 receivers=None,
                 roll_class=RetainerRoll,
                 retainer=retainer,
-                stat=stat,
-                skill=skill,
-                rating=rating,
+                stat=check.stat,
+                skill=check.skill,
+                rating=check.rating,
             )
         else:
             PrivateCheckMaker.perform_check_for_character(
@@ -100,17 +121,12 @@ class CmdStatCheck(ArxCommand):
                 receivers=self.rhslist,
                 roll_class=RetainerRoll,
                 retainer=retainer,
-                stat=stat,
-                skill=skill,
-                rating=rating,
+                stat=check.stat,
+                skill=check.skill,
+                rating=check.rating,
             )
 
-    def _get_retainer_from_args(self, args: str, syntax: str):
-        try:
-            retainer_id, args = args.split("/")
-        except ValueError:
-            raise self.error_class(syntax)
-
+    def _get_retainer_from_id(self, retainer_id: Union[str, int]):
         try:
             if retainer_id.isdigit():
                 retainer = self.caller.player_ob.retainers.get(id=retainer_id)
@@ -119,13 +135,13 @@ class CmdStatCheck(ArxCommand):
                     name__icontains=retainer_id
                 )
         except Agent.DoesNotExist:
-            raise self.error_class("Unable to find retainer by that name/ID.")
+            raise self.error_class("Unable to find retainer by that name/ID.") from None
         except Agent.MultipleObjectsReturned:
             raise self.error_class(
                 "Multiple retainers found, be more specific or use ID."
-            )
+            ) from None
 
-        return args, retainer
+        return retainer
 
     def get_check_values_from_args(self, args, syntax):
         try:
@@ -158,6 +174,8 @@ class CmdStatCheck(ArxCommand):
     def do_contested_check(self):
         if not self.caller.check_staff_or_gm():
             raise self.error_class("You are not GMing an event in this room.")
+
+        # Get the characters for this particular check/contest.
         characters = []
         if "here" in self.switches:
             characters = [
@@ -165,9 +183,7 @@ class CmdStatCheck(ArxCommand):
                 for ob in self.caller.location.contents
                 if ob.is_character and ob != self.caller
             ]
-            stat, skill, rating = self.get_check_values_from_args(
-                self.args, "Usage: stat [+ skill] at <difficulty rating>"
-            )
+            check_string = self.args
         else:
             if not self.rhs:
                 raise self.error_class(
@@ -178,12 +194,22 @@ class CmdStatCheck(ArxCommand):
                 if not character:
                     return
                 characters.append(character)
-            stat, skill, rating = self.get_check_values_from_args(
-                self.rhs, "Usage: stat [+ skill] at <difficulty rating>"
-            )
-        prefix = f"{self.caller} has called for a check of {SimpleRoll.get_check_string(stat, skill, rating)}."
+            check_string = self.rhs
+
+        try:
+            check = CheckString(check_string)
+            check.parse()
+        except CheckStringError as error:
+            raise self.error_class(error) from None
+
+        prefix = f"{self.caller} has called for a check of {get_check_string(check.stat, check.skill, check.rating)}."
         ContestedCheckMaker.perform_contested_check(
-            characters, self.caller, prefix, stat=stat, skill=skill, rating=rating
+            characters,
+            self.caller,
+            prefix,
+            stat=check.stat,
+            skill=check.skill,
+            rating=check.rating,
         )
 
     def do_opposing_checks(self):
@@ -292,37 +318,11 @@ class CmdSpoofCheck(ArxCommand):
             self.msg(err)
 
     def do_spoof_roll(self):
-        args = self.lhs if self.rhs else self.args
-        syntax_error = (
-            "Usage: <stat>/<value> [+ <skill>/<value>] at difficulty=<npc name>"
-        )
-
-        # Split string at ' at '
-        args, diff_rating = self._extract_difficulty(args, syntax_error)
-
-        # Split string at '+', if possible, and strip.
-        stat_str, skill_str = self._extract_stat_skill_string(args, syntax_error)
-
-        # Get Stat value
-        stat, stat_value = self._get_values(stat_str)
-        if stat and stat not in Trait.get_valid_stat_names():
-            raise self.error_class(f"{stat} is not a valid stat name.")
-
-        if stat_value < 1 or stat_value > self.STAT_LIMIT:
-            raise self.error_class(f"Stats must be between 1 and {self.STAT_LIMIT}.")
-
-        # Get skill value, if applicable (None if not)
-        skill = None
-        skill_value = None
-        if skill_str:
-            skill, skill_value = self._get_values(skill_str)
-            if skill and skill not in Trait.get_valid_skill_names():
-                raise self.error_class(f"{skill} is not a valid skill name.")
-
-            if skill_value < 1 or skill_value > self.SKILL_LIMIT:
-                raise self.error_class(
-                    f"Skills must be between 1 and {self.SKILL_LIMIT}."
-                )
+        try:
+            check = SpoofCheckString(self.lhs if self.rhs else self.args)
+            check.parse()
+        except CheckStringError as error:
+            raise self.error_class(error)
 
         # Will be None if not self.rhs, which is what we want.
         npc_name = self.rhs
@@ -333,11 +333,11 @@ class CmdSpoofCheck(ArxCommand):
         BaseCheckMaker.perform_check_for_character(
             self.caller,
             roll_class=SpoofRoll,
-            stat=stat,
-            stat_value=stat_value,
-            skill=skill,
-            skill_value=skill_value,
-            rating=diff_rating,
+            stat=check.stat,
+            stat_value=check.stat_value,
+            skill=check.skill,
+            skill_value=check.skill_value,
+            rating=check.rating,
             npc_name=npc_name,
             can_crit=can_crit,
             is_flub=is_flub,
