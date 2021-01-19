@@ -38,26 +38,6 @@ def parse_stat_skill(stat_skill_string: str) -> Tuple[str, Optional[str]]:
     return stat, skill
 
 
-def extract_value(string: str) -> Tuple[str, int]:
-    """
-    Given the Input string, extracts name and value.
-
-    Input: name/value
-    """
-    specify_msg = 'Specify "name/value" for stats and skills.'
-    value_msg = "Stat/skill values must be a number."
-
-    try:
-        lhs, rhs = string.split("/")
-    except ValueError:
-        raise CheckStringError(specify_msg) from None
-
-    if not rhs.isdigit():
-        raise CheckStringError(value_msg)
-
-    return lhs, int(rhs)
-
-
 class CheckStringError(Exception):
     pass
 
@@ -135,6 +115,8 @@ class SpoofCheckString(CheckString):
     SKILL_LIMIT = 20
 
     SYNTAX_MSG = "Usage: <stat>/<value> [+ <skill>/<value>] at difficulty=<npc name>"
+    SPECIFY_MSG = 'Specify "name/value" for stats and skills.'
+    VALUE_MSG = "Stat/skill values must be a number."
     STAT_LIMIT_MSG = f"Stats must be between 1 and {STAT_LIMIT}."
     SKILL_LIMIT_MSG = f"Skills must be between 1 and {SKILL_LIMIT}."
 
@@ -168,13 +150,30 @@ class SpoofCheckString(CheckString):
             skill_string = None
 
         # Extract stat and its spoof value
-        self.stat, self.stat_value = extract_value(stat_string.strip())
+        self.stat, self.stat_value = self.__extract_value(stat_string.strip())
         self.stat = self.stat.strip()
 
         # Extract skill and its spoof value, if applicable
         if skill_string:
-            self.skill, self.skill_value = extract_value(skill_string.strip())
+            self.skill, self.skill_value = self.__extract_value(skill_string.strip())
             self.skill = self.skill.strip()
+
+    def __extract_value(self, string: str) -> Tuple[str, int]:
+        """
+        Given the Input string, extracts name and value.
+
+        Input: name/value
+        """
+
+        try:
+            lhs, rhs = string.split("/")
+        except ValueError:
+            raise CheckStringError(self.SPECIFY_MSG) from None
+
+        if not rhs.isdigit():
+            raise CheckStringError(self.VALUE_MSG)
+
+        return lhs, int(rhs)
 
     def __validate_spoof_values(self):
         if self.stat_value < 1 or self.stat_value > self.STAT_LIMIT:
