@@ -1,3 +1,10 @@
+"""
+check_utils.py
+
+This module contains the CheckString hierarchy of classes as well as
+contains utility functions utilized by the @check code.
+"""
+
 from typing import Union
 
 from world.stat_checks.models import DifficultyRating
@@ -70,8 +77,7 @@ class CheckString:
 
     def _parse_stat_skill(self, stat_skill_string):
         """
-        Given the Input string, extracts the stat and skill from it and
-        validates both.
+        Given the Input string, extracts the stat and skill from it.
 
         Input: <stat> [+ <skill>]
         """
@@ -234,6 +240,8 @@ class VsCheckString(CheckString):
 
         self.stat, self.skill = self._parse_stat_skill(lhs)
         self.vs_stat, self.vs_skill = self._parse_stat_skill(rhs)
+
+        self._validate_stat_skill()
 
     def _validate_stat_skill(self):
         super()._validate_stat_skill()
