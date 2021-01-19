@@ -133,7 +133,6 @@ class SpoofCheckString(CheckString):
         self._extract_difficulty()
         self._extract_stat_skill()
         self._validate_stat_skill()
-        self.__validate_spoof_values()
 
     def _extract_stat_skill(self):
         # If syntax error on stat only
@@ -158,6 +157,15 @@ class SpoofCheckString(CheckString):
             self.skill, self.skill_value = self.__extract_value(skill_string.strip())
             self.skill = self.skill.strip()
 
+    def _validate_stat_skill(self):
+        super()._validate_stat_skill()
+
+        if self.stat_value < 1 or self.stat_value > self.STAT_LIMIT:
+            raise CheckStringError(self.STAT_LIMIT_MSG)
+        if self.skill:
+            if self.skill_value < 1 or self.skill_value > self.SKILL_LIMIT:
+                raise CheckStringError(self.SKILL_LIMIT_MSG)
+
     def __extract_value(self, string: str) -> Tuple[str, int]:
         """
         Given the Input string, extracts name and value.
@@ -174,13 +182,6 @@ class SpoofCheckString(CheckString):
             raise CheckStringError(self.VALUE_MSG)
 
         return lhs, int(rhs)
-
-    def __validate_spoof_values(self):
-        if self.stat_value < 1 or self.stat_value > self.STAT_LIMIT:
-            raise CheckStringError(self.STAT_LIMIT_MSG)
-        if self.skill:
-            if self.skill_value < 1 or self.skill_value > self.SKILL_LIMIT:
-                raise CheckStringError(self.SKILL_LIMIT_MSG)
 
 
 class RetainerCheckString(CheckString):
