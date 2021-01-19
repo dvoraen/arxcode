@@ -5,19 +5,57 @@ This module contains the CheckString hierarchy of classes as well as
 contains utility functions utilized by the @check code.
 """
 
-from typing import Union
+from typing import Optional, Tuple, Union
 
 from world.stat_checks.models import DifficultyRating
 from world.traits.models import Trait
 
 
-def get_check_string(stat, skill, rating):
+def get_check_string(stat: str, skill: Optional[str], rating: DifficultyRating) -> str:
     """
     Returns what stat/skill/rating are being checked as a string.
     """
     if skill:
         return f"{stat} and {skill} at {rating}"
     return f"{stat} at {rating}"
+
+
+def parse_stat_skill(stat_skill_string: str) -> Tuple[str, Optional[str]]:
+    """
+    Given the Input string, extracts the stat and skill from it.
+
+    Input: <stat> [+ <skill>]
+    """
+    try:
+        stat, skill = stat_skill_string.split("+")
+    except ValueError:
+        stat = stat_skill_string.strip().lower()
+        skill = None
+    else:
+        stat = stat.strip().lower()
+        skill = skill.strip().lower()
+
+    return stat, skill
+
+
+def extract_value(string: str) -> Tuple[str, int]:
+    """
+    Given the Input string, extracts name and value.
+
+    Input: name/value
+    """
+    specify_msg = 'Specify "name/value" for stats and skills.'
+    value_msg = "Stat/skill values must be a number."
+
+    try:
+        lhs, rhs = string.split("/")
+    except ValueError:
+        raise CheckStringError(specify_msg) from None
+
+    if not rhs.isdigit():
+        raise CheckStringError(value_msg)
+
+    return lhs, int(rhs)
 
 
 class CheckStringError(Exception):
@@ -58,6 +96,7 @@ class CheckString:
         """
         self._extract_difficulty()
         self._extract_stat_skill()
+        self._validate_stat_skill()
 
     def _extract_difficulty(self):
         try:
@@ -72,25 +111,8 @@ class CheckString:
             raise CheckStringError(self.DIFFICULTY_MSG.format(rating=diff_str))
 
     def _extract_stat_skill(self):
-        self.stat, self.skill = self._parse_stat_skill(self.work_string)
+        self.stat, self.skill = parse_stat_skill(self.work_string)
         self._validate_stat_skill()
-
-    def _parse_stat_skill(self, stat_skill_string):
-        """
-        Given the Input string, extracts the stat and skill from it.
-
-        Input: <stat> [+ <skill>]
-        """
-        try:
-            stat, skill = stat_skill_string.split("+")
-        except ValueError:
-            stat = stat_skill_string.strip().lower()
-            skill = None
-        else:
-            stat = stat.strip().lower()
-            skill = skill.strip().lower()
-
-        return stat, skill
 
     def _validate_stat_skill(self):
         if self.stat not in Trait.get_valid_stat_names():
@@ -113,8 +135,6 @@ class SpoofCheckString(CheckString):
     SKILL_LIMIT = 20
 
     SYNTAX_MSG = "Usage: <stat>/<value> [+ <skill>/<value>] at difficulty=<npc name>"
-    SPECIFY_MSG = 'Specify "name/value" for stats and skills.'
-    VALUE_MSG = "Stat/skill values must be a number."
     STAT_LIMIT_MSG = f"Stats must be between 1 and {STAT_LIMIT}."
     SKILL_LIMIT_MSG = f"Skills must be between 1 and {SKILL_LIMIT}."
 
@@ -126,6 +146,12 @@ class SpoofCheckString(CheckString):
 
     def __repr__(self):
         return f"<SpoofCheckString: {self.stat} {self.stat_value}, {self.skill} {self.skill_value}, {self.rating}>"
+
+    def parse(self):
+        self._extract_difficulty()
+        self._extract_stat_skill()
+        self._validate_stat_skill()
+        self.__validate_spoof_values()
 
     def _extract_stat_skill(self):
         # If syntax error on stat only
@@ -142,19 +168,13 @@ class SpoofCheckString(CheckString):
             skill_string = None
 
         # Extract stat and its spoof value
-        self.stat, self.stat_value = self.__extract_value(stat_string.strip())
+        self.stat, self.stat_value = extract_value(stat_string.strip())
         self.stat = self.stat.strip()
 
         # Extract skill and its spoof value, if applicable
         if skill_string:
-            self.skill, self.skill_value = self.__extract_value(skill_string.strip())
+            self.skill, self.skill_value = extract_value(skill_string.strip())
             self.skill = self.skill.strip()
-
-        # Validate stat/skill names.
-        self._validate_stat_skill()
-
-        # Validate spoof values.
-        self.__validate_spoof_values()
 
     def __validate_spoof_values(self):
         if self.stat_value < 1 or self.stat_value > self.STAT_LIMIT:
@@ -162,17 +182,6 @@ class SpoofCheckString(CheckString):
         if self.skill:
             if self.skill_value < 1 or self.skill_value > self.SKILL_LIMIT:
                 raise CheckStringError(self.SKILL_LIMIT_MSG)
-
-    def __extract_value(self, string: str):
-        try:
-            lhs, rhs = string.split("/")
-        except ValueError:
-            raise CheckStringError(self.SPECIFY_MSG) from None
-
-        if not rhs.isdigit():
-            raise CheckStringError(self.VALUE_MSG)
-
-        return lhs, int(rhs)
 
 
 class RetainerCheckString(CheckString):
@@ -199,6 +208,7 @@ class RetainerCheckString(CheckString):
         self.__extract_retainer_id()
         self._extract_difficulty()
         self._extract_stat_skill()
+        self._validate_stat_skill()
 
     def __extract_retainer_id(self):
         try:
@@ -231,6 +241,7 @@ class VsCheckString(CheckString):
 
     def parse(self):
         self._extract_stat_skill()
+        self._validate_stat_skill()
 
     def _extract_stat_skill(self):
         try:
@@ -238,10 +249,8 @@ class VsCheckString(CheckString):
         except ValueError:
             raise CheckStringError(self.TWO_CHECK_MSG) from None
 
-        self.stat, self.skill = self._parse_stat_skill(lhs)
-        self.vs_stat, self.vs_skill = self._parse_stat_skill(rhs)
-
-        self._validate_stat_skill()
+        self.stat, self.skill = parse_stat_skill(lhs)
+        self.vs_stat, self.vs_skill = parse_stat_skill(rhs)
 
     def _validate_stat_skill(self):
         super()._validate_stat_skill()
