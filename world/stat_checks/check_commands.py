@@ -18,6 +18,7 @@ from world.stat_checks.check_utils import (
     CheckString,
     SpoofCheckString,
     RetainerCheckString,
+    VsCheckString,
 )
 
 from world.dominion.models import Agent
@@ -143,34 +144,6 @@ class CmdStatCheck(ArxCommand):
 
         return retainer
 
-    def get_check_values_from_args(self, args, syntax):
-        try:
-            stats_string, rating_string = args.split(" at ")
-        except (TypeError, ValueError):
-            raise self.error_class(syntax)
-        stat, skill = self.get_stat_and_skill_from_args(stats_string)
-        rating_string = rating_string.strip()
-        rating = DifficultyRating.get_instance_by_name(rating_string)
-        if not rating:
-            raise self.error_class(
-                f"'{rating_string}' is not a valid difficulty rating."
-            )
-        return stat, skill, rating
-
-    def get_stat_and_skill_from_args(self, stats_string):
-        skill = None
-        try:
-            stat, skill = stats_string.split("+")
-            stat = stat.strip().lower()
-            skill = skill.strip().lower()
-        except (TypeError, ValueError):
-            stat = stats_string.strip().lower()
-        if stat not in Trait.get_valid_stat_names():
-            raise self.error_class(f"{stat} is not a valid stat name.")
-        if skill and skill not in Trait.get_valid_skill_names():
-            raise self.error_class(f"{skill} is not a valid skill name.")
-        return stat, skill
-
     def do_contested_check(self):
         if not self.caller.check_staff_or_gm():
             raise self.error_class("You are not GMing an event in this room.")
@@ -220,19 +193,24 @@ class CmdStatCheck(ArxCommand):
             return
         if not target.is_character:
             raise self.error_class("That is not a character.")
-        check_strings = self.lhs.split(" vs ")
-        if len(check_strings) != 2:
-            raise self.error_class("Must provide two checks.")
-        args = [(self.caller, check_strings[0]), (target, check_strings[1])]
+
+        try:
+            check = VsCheckString(self.lhs)
+            check.parse()
+        except CheckStringError as error:
+            raise self.error_class(error) from None
+
         # use first difficulty value as the rating both checks share
         rating = DifficultyRating.get_all_cached_instances()[0]
-        rolls = []
-        for arg in args:
-            stat, skill = self.get_stat_and_skill_from_args(arg[1])
-            rolls.append(
-                SimpleRoll(character=arg[0], stat=stat, skill=skill, rating=rating)
-            )
-        OpposingRolls(rolls[0], rolls[1], self.caller, target).announce()
+
+        caller_roll = SimpleRoll(
+            character=self.caller, stat=check.stat, skill=check.skill, rating=rating
+        )
+        vs_roll = SimpleRoll(
+            character=target, stat=check.vs_stat, skill=check.vs_skill, rating=rating
+        )
+
+        OpposingRolls(caller_roll, vs_roll, self.caller, target).announce()
 
 
 class CmdHarm(ArxCommand):

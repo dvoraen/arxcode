@@ -19,8 +19,8 @@ class CheckStringError(Exception):
 
 class CheckString:
     """
-    CheckValues is a class that performs data extraction from an Arx
-    'check string' as dictated by the @check command.
+    CheckString is a class that performs data extraction from a
+    check string as dictated by the base @check command.
 
     Input: <stat> [+ <skill>] at <difficulty>
     """
@@ -65,18 +65,28 @@ class CheckString:
             raise CheckStringError(self.DIFFICULTY_MSG.format(rating=diff_str))
 
     def _extract_stat_skill(self):
-        # Before split: "stat + skill"
-        # After split: "stat ", " skill"
-        try:
-            self.stat, self.skill = self.work_string.split("+")
-        except ValueError:
-            self.stat = self.work_string.strip().lower()
-            # self.skill is None
-        else:
-            self.stat = self.stat.strip().lower()
-            self.skill = self.skill.strip().lower()
+        self.stat, self.skill = self._parse_stat_skill(self.work_string)
+        self._validate_stat_skill()
 
-        # Validate stat and skill names where applicable.
+    def _parse_stat_skill(self, stat_skill_string):
+        """
+        Given the Input string, extracts the stat and skill from it and
+        validates both.
+
+        Input: <stat> [+ <skill>]
+        """
+        try:
+            stat, skill = stat_skill_string.split("+")
+        except ValueError:
+            stat = stat_skill_string.strip().lower()
+            skill = None
+        else:
+            stat = stat.strip().lower()
+            skill = skill.strip().lower()
+
+        return stat, skill
+
+    def _validate_stat_skill(self):
         if self.stat not in Trait.get_valid_stat_names():
             raise CheckStringError(self.STAT_MSG.format(stat=self.stat))
         if self.skill and self.skill not in Trait.get_valid_skill_names():
@@ -85,8 +95,10 @@ class CheckString:
 
 class SpoofCheckString(CheckString):
     """
-    SpoofCheckValues performs additional data extraction from an Arx
-    'check string' that's supplied by the @gmcheck command.
+    SpoofCheckString performs data extraction from a check string
+    that's supplied by the @gmcheck command.
+
+    It holds the spoof values in addition to the rest.
 
     Input: <stat>/<stat value> [+ <skill>/<skill value>] at difficulty
     """
@@ -133,12 +145,12 @@ class SpoofCheckString(CheckString):
             self.skill = self.skill.strip()
 
         # Validate stat/skill names.
-        if self.stat not in Trait.get_valid_stat_names():
-            raise CheckStringError(self.STAT_MSG.format(stat=self.stat))
-        if self.skill and self.skill not in Trait.get_valid_skill_names():
-            raise CheckStringError(self.SKILL_MSG.format(skill=self.skill))
+        self._validate_stat_skill()
 
         # Validate spoof values.
+        self.__validate_spoof_values()
+
+    def __validate_spoof_values(self):
         if self.stat_value < 1 or self.stat_value > self.STAT_LIMIT:
             raise CheckStringError(self.STAT_LIMIT_MSG)
         if self.skill:
@@ -159,7 +171,10 @@ class SpoofCheckString(CheckString):
 
 class RetainerCheckString(CheckString):
     """
-    RetainerCheckValues
+    RetainerCheckValues performs data extraction on a check string
+    provided by @check/retainer.
+
+    It holds the value of the given retainer_id as well as the rest.
 
     Input: <id/name>/<stat> [+ <skill>] at difficulty
     """
@@ -184,3 +199,46 @@ class RetainerCheckString(CheckString):
             self.retainer_id, self.work_string = self.work_string.split("/")
         except ValueError:
             raise CheckStringError(self.SYNTAX_MSG) from None
+
+
+class VsCheckString(CheckString):
+    """
+    VsCheckString performs data extraction on a check string
+    provided by @check/vs.
+
+    It holds both the left side and right side stat/skill values.
+
+    Input: stat [+ skill] vs stat [+ skill]
+    """
+
+    SYNTAX_MSG = "Usage: stat [+ skill] vs stat [+ skill]=target"
+    TWO_CHECK_MSG = "Must provide two checks."
+
+    def __init__(self, check_string: str):
+        super().__init__(check_string)
+
+        self.vs_stat: str = None
+        self.vs_skill: str = None
+
+    def __repr__(self):
+        return f"<VsCheckString: {self.stat}, {self.skill} vs {self.vs_stat}, {self.vs_skill}>"
+
+    def parse(self):
+        self._extract_stat_skill()
+
+    def _extract_stat_skill(self):
+        try:
+            lhs, rhs = self.work_string.split(" vs ")
+        except ValueError:
+            raise CheckStringError(self.TWO_CHECK_MSG) from None
+
+        self.stat, self.skill = self._parse_stat_skill(lhs)
+        self.vs_stat, self.vs_skill = self._parse_stat_skill(rhs)
+
+    def _validate_stat_skill(self):
+        super()._validate_stat_skill()
+
+        if self.vs_stat not in Trait.get_valid_stat_names():
+            raise CheckStringError(self.STAT_MSG.format(stat=self.vs_stat))
+        if self.vs_skill and self.vs_skill not in Trait.get_valid_skill_names():
+            raise CheckStringError(self.SKILL_MSG.format(skill=self.vs_skill))
