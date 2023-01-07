@@ -166,13 +166,13 @@ class AccountCmdSet(cmdset_account.AccountCmdSet):
     @check_errors
     def add_general_commands(self):
         """Add general/misc commands"""
-        from commands.base_commands import general
+        from commands.base_commands import general, settings
 
         self.add(general.CmdPage())
         self.add(general.CmdMail())
         self.add(general.CmdGradient())
         self.add(general.CmdInform())
-        self.add(general.CmdGameSettings())
+        self.add(settings.CmdSettings())
 
     @check_errors
     def add_bboard_commands(self):
