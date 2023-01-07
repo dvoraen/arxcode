@@ -1,18 +1,18 @@
 """
 General Character commands usually available to all characters
 """
-from six import string_types
-
 from django.conf import settings
+from evennia import InterruptCommand
 from evennia.comms.models import TempMsg
 from evennia.objects.models import ObjectDB
-from evennia.utils import utils, evtable
+from evennia.utils import evtable, utils
 from evennia.utils.utils import make_iter, variable_from_module
+from six import string_types
 
-from server.utils import prettytable
-from server.utils.arx_utils import raw, list_to_string
 from commands.base import ArxCommand, ArxPlayerCommand
 from commands.mixins import RewardRPToolUseMixin
+from server.utils import prettytable
+from server.utils.arx_utils import list_to_string, raw
 
 AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 1))
 
@@ -42,7 +42,7 @@ class CmdBriefMode(ArxCommand):
             caller.msg("Brief mode is now on.")
 
 
-class CmdGameSettings(ArxPlayerCommand):
+class CmdOldGameSettings(ArxPlayerCommand):
     """
     @settings toggles different settings.
 
@@ -96,8 +96,8 @@ class CmdGameSettings(ArxPlayerCommand):
     /place_color sets a color for place names (with highlight_place enabled).
     """
 
-    key = "@settings"
-    locks = "cmd:all()"
+    key = "@oldsettings"
+    locks = "cmd:none()"
     help_category = "Settings"
     aliases = ["lrp"]
     valid_switches = (
@@ -127,6 +127,9 @@ class CmdGameSettings(ArxPlayerCommand):
     )
 
     def func(self):
+        self.caller.msg("@settings is DEPRECATED and should no longer be used.")
+        raise InterruptCommand
+
         """Executes setting command"""
         caller = self.caller
         char = caller.char_ob
