@@ -6,7 +6,6 @@ settings command.
 """
 
 
-from django.core.exceptions import ValidationError
 from django.db import models
 from evennia import EvTable
 from evennia.utils.idmapper.models import SharedMemoryModel
@@ -51,12 +50,44 @@ def validate_color(value):
     xterm256_fg = r"[{|][0-5]{3}|[{|]=[a-z]"
     xterm256_bg = r"[{|]\[[0-5]{3}|[{|]\[=[a-z]"
 
-    raise ValidationError
+
+class CategorySettings(SharedMemoryModel):
+    class Meta:
+        abstract = True
+
+    category = "Unknown"
+    table_settings = {"border": "tablecols", "header_line_char": "-"}
+
+    def get_table(self):
+        fields = self._meta.get_fields()
+
+        table = EvTable(self.category, **self.table_settings)
+
+        # Checking for what fields to add by way of which ones have help_text
+        # defined.  CraftSettings and BankSettings will be overriding get_table()
+        # due to the nature of their settings.
+        for field in fields:
+            if field.help_text:
+                table.add_row(field.name, field.help_text, getattr(self, field.name))
+
+        # Reformat table as follows
+        # - Column index 1 (setting description) needs to be wide.
+        # - Row 0 of columns 1 and 2 (header row) have no borders to display the header row
+        #   so that it looks like a "tab" sticking out of the top on the left.
+        table.table[1].reformat_cell(0, border_width=0)
+        table.table[2].reformat_cell(0, border_width=0)
+
+        return table
 
 
-class ArxSettings(SharedMemoryModel):
+class AllSettings(CategorySettings):
+    category = "All"
+
     character = models.OneToOneField(
-        "characters.Character", on_delete=models.CASCADE, related_name="settings"
+        "objects.ObjectDB",
+        on_delete=models.CASCADE,
+        related_name="settings",
+        primary_key=True,
     )
 
     # related models
@@ -70,6 +101,17 @@ class ArxSettings(SharedMemoryModel):
     rp: "RPSettings"
     # craft: "CraftSettings"
     # bank: "BankSettings"
+
+    general = models.OneToOneField(
+        "GeneralSettings", on_delete=models.CASCADE, related_name="+"
+    )
+    comm = models.OneToOneField(
+        "CommSettings", on_delete=models.CASCADE, related_name="+"
+    )
+    rp = models.OneToOneField("RPSettings", on_delete=models.CASCADE, related_name="+")
+
+    # craft = models.OneToOneField("CraftSettings", on_delete=models.CASCADE, related_name="+")
+    # bank = models.OneToOneField("BankSettings", on_delete=models.CASCADE, related_name="+")
 
     def get_table(self):
         # Going to redo.  For displaying "all" settings, I want to have faux
@@ -110,42 +152,8 @@ class ArxSettings(SharedMemoryModel):
         return "\n".join(str(table) for table in tables)
 
 
-class CategorySettings(SharedMemoryModel):
-    class Meta:
-        abstract = True
-
-    category = "Unknown"
-    table_settings = {"border": "tablecols", "header_line_char": "-"}
-
-    def get_table(self):
-        fields = self._meta.get_fields()
-
-        table = EvTable(self.category, **self.table_settings)
-
-        # Checking for what fields to add by way of which ones have help_text
-        # defined.  CraftSettings and BankSettings will be overriding get_table()
-        # due to the nature of their settings.
-        for field in fields:
-            if field.help_text:
-                table.add_row(field.name, field.help_text, getattr(self, field.name))
-
-        # Reformat table as follows
-        # - Column index 1 (setting description) needs to be wide.
-        # - Row 0 of columns 1 and 2 (header row) have no borders to display the header row
-        #   so that it looks like a "tab" sticking out of the top on the left.
-        table.table[1].reformat(width=40)
-        table.table[1].reformat_cell(0, border_width=0)
-        table.table[2].reformat_cell(0, border_width=0)
-
-        return table
-
-
 class GeneralSettings(CategorySettings):
     category = "General"
-
-    base = models.OneToOneField(
-        ArxSettings, on_delete=models.CASCADE, related_name="general"
-    )
 
     ### Settings for gameplay modes. ###
 
@@ -199,10 +207,6 @@ class GeneralSettings(CategorySettings):
 class CommSettings(CategorySettings):
     category = "Communication"
 
-    base = models.OneToOneField(
-        ArxSettings, on_delete=models.CASCADE, related_name="comm"
-    )
-
     ### Settings for bboards. ###
 
     allow_bb_altread = models.BooleanField(
@@ -234,10 +238,6 @@ class RPSettings(CategorySettings):
 
     class Meta:
         verbose_name = "rp settings"
-
-    base = models.OneToOneField(
-        ArxSettings, on_delete=models.CASCADE, related_name="rp"
-    )
 
     ### Settings for emits and poses. ###
 
@@ -275,10 +275,6 @@ class RPSettings(CategorySettings):
 # class CraftSettings(CategorySettings):
 #     category = "Crafting"
 
-#     base = models.OneToOneField(
-#         ArxSettings, on_delete=models.CASCADE, related_name="craft"
-#     )
-
 #     # TODO: Should I have ShopSettings with this in it?
 #     # I think more db models need to exist before this is possible.  Namely:
 #     # - DB listings of what a shop is
@@ -303,10 +299,6 @@ class RPSettings(CategorySettings):
 #     # related models
 #     # resources -> Manager?[BankResourceSetting]
 #     # materials -> Manager?[BankMaterialSetting]
-
-#     base = models.OneToOneField(
-#         ArxSettings, on_delete=models.CASCADE, related_name="bank"
-#     )
 
 #     def get_table(self):
 #         table = super().get_table()
