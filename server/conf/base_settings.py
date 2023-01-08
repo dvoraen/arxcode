@@ -139,6 +139,7 @@ TEMPLATES[0]["OPTIONS"]["debug"] = DEBUG
 # Global and Evennia-specific apps. This ties everything together so we can
 # refer to app models and perform DB syncs.
 INSTALLED_APPS += (
+    "world.settings",
     "world.dominion",
     "world.msgs",
     "world.conditions.apps.ConditionsConfig",
