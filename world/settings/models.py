@@ -6,8 +6,9 @@ settings command.
 """
 
 
+from django.core.exceptions import FieldDoesNotExist
 from django.db import models
-from evennia import EvTable
+from evennia.utils.evtable import EvTable
 from evennia.utils.idmapper.models import SharedMemoryModel
 
 # @settings/brief                           - general
@@ -56,26 +57,51 @@ class CategorySettings(SharedMemoryModel):
         abstract = True
 
     category = "Unknown"
-    table_settings = {"border": "tablecols", "header_line_char": "-"}
+
+    def has_setting(self, setting_name):
+        try:
+            self._meta.get_field(setting_name)
+            return True
+        except FieldDoesNotExist:
+            return False
 
     def get_table(self):
         fields = self._meta.get_fields()
 
-        table = EvTable(self.category, **self.table_settings)
+        table = EvTable(
+            f"|w{self.category}|n",
+            border="tablecols",
+            header_line_char="-",
+            valign="t",
+        )
 
         # Checking for what fields to add by way of which ones have help_text
         # defined.  CraftSettings and BankSettings will be overriding get_table()
         # due to the nature of their settings.
         for field in fields:
             if field.help_text:
-                table.add_row(field.name, field.help_text, getattr(self, field.name))
+                # TODO: Check for the presence of color codes and bools and adjust
+                # the output accordingly.
+                value = getattr(self, field.name)
+                if isinstance(value, bool):
+                    value = "On" if value else "Off"
 
-        # Reformat table as follows
-        # - Column index 1 (setting description) needs to be wide.
-        # - Row 0 of columns 1 and 2 (header row) have no borders to display the header row
-        #   so that it looks like a "tab" sticking out of the top on the left.
-        table.table[1].reformat_cell(0, border_width=0)
-        table.table[2].reformat_cell(0, border_width=0)
+                table.add_row(field.name, field.help_text, value)
+
+        # Reformat table as follows:
+        # - Settings names are centered.
+        # - Setting descriptions are capped so there's no screen overflow.
+        # - Setting values are centered.
+        table.table[0].reformat(align="c")
+        table.table[1].reformat(width=40)
+        table.table[2].reformat(align="c")
+
+        # - Column cells have a pad at the bottom except for the header and the
+        #   last cell in each column.
+        for column in table.table:
+            column.reformat(pad_bottom=1)
+            column.reformat_cell(0, pad_bottom=0)
+            column.reformat_cell(table.nrows - 1, pad_bottom=0)
 
         return table
 
@@ -83,10 +109,15 @@ class CategorySettings(SharedMemoryModel):
 class AllSettings(CategorySettings):
     category = "All"
 
+    class Meta:
+        verbose_name = "Settings"
+        verbose_name_plural = "Settings"
+
     character = models.OneToOneField(
         "objects.ObjectDB",
         on_delete=models.CASCADE,
         related_name="settings",
+        db_index=True,
         primary_key=True,
     )
 
@@ -101,17 +132,6 @@ class AllSettings(CategorySettings):
     rp: "RPSettings"
     # craft: "CraftSettings"
     # bank: "BankSettings"
-
-    general = models.OneToOneField(
-        "GeneralSettings", on_delete=models.CASCADE, related_name="+"
-    )
-    comm = models.OneToOneField(
-        "CommSettings", on_delete=models.CASCADE, related_name="+"
-    )
-    rp = models.OneToOneField("RPSettings", on_delete=models.CASCADE, related_name="+")
-
-    # craft = models.OneToOneField("CraftSettings", on_delete=models.CASCADE, related_name="+")
-    # bank = models.OneToOneField("BankSettings", on_delete=models.CASCADE, related_name="+")
 
     def get_table(self):
         # Going to redo.  For displaying "all" settings, I want to have faux
@@ -154,6 +174,18 @@ class AllSettings(CategorySettings):
 
 class GeneralSettings(CategorySettings):
     category = "General"
+
+    class Meta:
+        verbose_name = "General Settings"
+        verbose_name_plural = "General Settings"
+
+    base = models.OneToOneField(
+        AllSettings,
+        on_delete=models.CASCADE,
+        editable=False,
+        primary_key=True,
+        related_name="general",
+    )
 
     ### Settings for gameplay modes. ###
 
@@ -207,6 +239,18 @@ class GeneralSettings(CategorySettings):
 class CommSettings(CategorySettings):
     category = "Communication"
 
+    class Meta:
+        verbose_name = "Comm Settings"
+        verbose_name_plural = "Comm Settings"
+
+    base = models.OneToOneField(
+        AllSettings,
+        on_delete=models.CASCADE,
+        editable=False,
+        primary_key=True,
+        related_name="comm",
+    )
+
     ### Settings for bboards. ###
 
     allow_bb_altread = models.BooleanField(
@@ -237,7 +281,16 @@ class RPSettings(CategorySettings):
     category = "RP"
 
     class Meta:
-        verbose_name = "rp settings"
+        verbose_name = "RP Settings"
+        verbose_name_plural = "RP Settings"
+
+    base = models.OneToOneField(
+        AllSettings,
+        on_delete=models.CASCADE,
+        editable=False,
+        primary_key=True,
+        related_name="rp",
+    )
 
     ### Settings for emits and poses. ###
 
