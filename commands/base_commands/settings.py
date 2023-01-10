@@ -24,8 +24,9 @@ class CmdSettings(ArxCommand):
       settings <category>
       settings <category>/<setting_name>=<value>
 
-      settings/find <setting_name>
-      settings/apply <category>[/<setting_name>]=<character>
+      settings/find <partial_setting_name>
+      settings/apply <category>=<character>
+      settings/apply <category>/<setting_name>=<character>
 
     Switches:
       (none) - displays the settings in the specified category
@@ -36,15 +37,17 @@ class CmdSettings(ArxCommand):
 
     Categories:
       all
-      general - settings related to Arx gameplay
+      general - settings related to Arx gameplay (game output)
       comm    - settings related to communication (channels, pages, messages)
-      rp      - settings related to RP
+      rp      - settings related to RP (emits/poses)
 
     Examples:
       settings all                     - shows all settings
       settings rp/emit_label=on        - sets emit_label in category "rp" to on
-      settings/apply all=Alt           - applies every setting on you to Alt
-      settings/apply rp/emit_label=Alt - applies emit_label setting to Alt
+      settings/find msg                - find all settings with "msg" in the name
+      settings/apply all=Alt           - applies all of your settings to Alt
+      settings/apply rp=Alt            - applies each "rp" setting to Alt
+      settings/apply rp/emit_label=Alt - applies "rp" emit_label setting to Alt
     """
 
     key = "settings"
@@ -74,7 +77,7 @@ class CmdSettings(ArxCommand):
         "invalid_setting_category": '"all" is not a valid category for setting a specific setting.\nUse settings/find to find that setting\'s category.',
         "invalid_setting_name": "'{setting_name}' is not a setting in category '{category}'.",
         "no_settings_found": 'No settings found with names containing "{setting_name}"',
-        "setting_not_configured": "Your character doesn't have settings configured for '{category}'.\nNotify staff of this problem.",
+        "setting_not_configured": "Your character doesn't have settings configured for '{category}'.\n|w*** Notify staff of this problem. ***|n",
     }
 
     # User input set by parse():
@@ -87,10 +90,17 @@ class CmdSettings(ArxCommand):
         self.category = None
         self.setting_name = None
 
+        self.settings = {
+            "all": self.caller.settings,
+            "general": self.caller.settings.general,
+            "rp": self.caller.settings.rp,
+            "comm": self.caller.settings.comm,
+        }
+
         # If we're finding a setting, we "should" just have a setting_name
-        # and that's all we need to do here.
+        # in the input/args and that's all we need to do here.
         if "find" in self.switches:
-            self.setting_name = self.args
+            self.setting_name = self.args.lower()
             return
 
         # Parse lhs; it's the only "dynamic" part of the command that
@@ -100,10 +110,21 @@ class CmdSettings(ArxCommand):
         else:
             self.category = self.lhs
 
+        self.category = self.category.lower() if self.category else None
+        self.setting_name = self.category.lower() if self.setting_name else None
+
     def func(self):
         # This command always requires input beyond the command name.
         if not self.args:
-            self.caller.msg(self.error_msgs["usage_category"])
+            response = "\n".join(
+                (
+                    self.error_msgs["usage_category"],
+                    self.error_msgs["usage_setting"],
+                    self.error_msgs["usage_find"],
+                    self.error_msgs["usage_apply"],
+                )
+            )
+            self.caller.msg(response)
             raise InterruptCommand
 
         if "find" in self.switches:
@@ -125,9 +146,8 @@ class CmdSettings(ArxCommand):
         """
         Validates the input category against those defined in CmdSettings.model_map.
         """
-        category = self.category.lower()
 
-        if category not in self.model_map.keys():
+        if self.category not in self.model_map.keys():
             response = self.error_msgs["invalid_category"].format(
                 category=self.category,
                 valid_categories=", ".join(self.model_map.keys()),
@@ -143,24 +163,15 @@ class CmdSettings(ArxCommand):
         Precondition:
         - The category was validated.
         """
-        category = self.category.lower()
 
         # Settings don't directly exist in the 'all' category; it's invalid.
-        if category == "all":
+        if self.category == "all":
             self.caller.msg(self.model_map["invalid_setting_category"])
             raise InterruptCommand
 
-        # Look for a field with the name as the (lowercase) provided setting on
-        # the relevant model for that category.
-        # This shouldn't hit the database at all compared to digging up the instance
-        # of the setting model and using hasattr().  I prefer this approach compared to
-        # hasattr() on the basis that it fully validates the setting as an actual field
-        # on the model we're looking at.  hasattr() could hit a false-positive with
-        # other attributes set on the model (e.g. the category attribute). -dvo
-        try:
-            model = self.model_map[category]
-            model._meta.get_field(self.setting_name.lower())
-        except FieldDoesNotExist:
+        # Validate whether setting exists on the model.
+        settings = self.settings[self.category]
+        if not settings.has_setting(self.setting_name):
             response = self.error_msgs["invalid_setting_name"].format(
                 category=self.category, setting_name=self.setting_name
             )
@@ -178,15 +189,7 @@ class CmdSettings(ArxCommand):
         """
         self.validate_category()
 
-        category = self.category.lower()
-
-        settings = (
-            self.caller.settings
-            if category == "all"
-            else getattr(self.caller.settings, category)
-        )
-
-        table = settings.get_table()
+        table = self.settings[self.category].get_table()
         self.caller.msg(table)
 
     def display_setting(self):
@@ -196,24 +199,9 @@ class CmdSettings(ArxCommand):
         self.validate_category()
         self.validate_setting()
 
-        category = self.category.lower()
-        setting_name = self.setting_name.lower()
-
-        try:
-            # Both category and setting name have been validated; they shouldn't
-            # raise AttributeError or FieldDoesNotExist here.  The only way
-            # AttributeError 'should' show up is if caller.settings doesn't
-            # have that category set up for some reason.
-            model = self.model_map[category]
-            settings = getattr(self.caller.settings, category)
-            setting_field = model._meta.get_field(setting_name)
-            setting_value = getattr(settings, setting_name)
-        except AttributeError:
-            response = self.error_msgs["setting_not_configured"].format(
-                category=category
-            )
-            self.caller.msg(response)
-            raise InterruptCommand
+        settings = self.settings[self.category]
+        setting_field = settings._meta.get_field(self.setting_name)
+        setting_value = getattr(settings, self.setting_name)
 
         table = EvTable(border=None)
         table.add_row(setting_field.name, setting_field.help_text, setting_value)
@@ -227,18 +215,24 @@ class CmdSettings(ArxCommand):
         FoundSetting = namedtuple("FoundSetting", ["name", "category", "help_text"])
 
         found_settings = []
+        # For each model in our settings library, look for a field with
+        # that setting's name.  If it exists, add it to the list.
         for category, model in self.model_map.items():
-            # For each model in our settings library, look for a field with
-            # that settings name.  If it exists, add it to the list.
+            # Nothing to be found in "all"; move on.
+            if category == "all":
+                continue
+
             fields = model._meta.get_fields()
 
-            found_settings = [
+            category_settings = [
                 FoundSetting(
                     name=field.name, category=category, help_text=field.help_text
                 )
                 for field in fields
                 if self.setting_name in field.name
             ]
+
+            found_settings.extend(category_settings)
 
         if not found_settings:
             response = self.error_msgs["no_settings_found"].format(
@@ -248,23 +242,26 @@ class CmdSettings(ArxCommand):
             raise InterruptCommand
 
         table = EvTable(
-            f'Results for "{self.setting_name}"',
+            f'|wResults for "{self.setting_name}"|n',
             border="tablecols",
             header_line_char="-",
+            valign="t",
         )
 
         for setting in found_settings:
             table.add_row(setting.name, setting.category, setting.help_text)
 
-        # Header row has no border.
+        # Header row and last row have no padding at the bottom.
         for column in table.table:
-            column.reformat_cell(0, pad_width=0, border_width=0)
+            column.reformat(pad_bottom=1)
+            column.reformat_cell(0, pad_bottom=0)
+            column.reformat_cell(table.nrows - 1, pad_bottom=0)
 
         # Setting name and category are centered and top-aligned.
         # The help_text is just top (and left/default) aligned.
-        table.table[0].reformat(align="c", valign="t")
-        table.table[1].reformat(align="c", valign="t")
-        table.table[2].reformat(valign="t")
+        table.table[0].reformat(align="c")
+        table.table[1].reformat(align="c")
+        table.table[2].reformat(width=40)
 
         self.caller.msg(table)
 
@@ -278,9 +275,13 @@ class CmdSettings(ArxCommand):
         # category settings for the alt, then, and perhaps with lower database interaction
         # than chaining through models to get to the required settings.
         self.validate_category()
-        if self.setting_name:
+        if self.setting_name is not None:
             self.validate_setting()
         self.validate_alt()
+
+        # Alt was validated, so self.rhs should be okay.
+        # Get alt's settings model instance.
+        # Apply caller's specified setting(s) to alt settings.
 
     def set_setting(self):
         """
