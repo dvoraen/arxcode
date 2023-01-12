@@ -11,37 +11,6 @@ from django.db import models
 from evennia.utils.evtable import EvTable
 from evennia.utils.idmapper.models import SharedMemoryModel
 
-# @settings/brief                           - general
-# @settings/stripansinames                  - general?
-# @settings/no_ascii                        - general
-# @settings/ic_only                         - general
-# @settings/ignore_weather                  - general
-# @settings/private_mode                    - general?
-# @settings/verbose_where                   - general
-# @settings/ignore_model_emits              - general?
-
-# @settings/bbaltread                       - comm
-# @settings/ignore_bboard_notifications     - comm
-# @settings/nomessengerpreview              - comm?
-# @settings/ignore_messenger_notifications  - comm?
-# @settings/ignore_messenger_deliveries     - comm?
-# @settings/highlight_all_mentions          - comm
-
-# @settings/emit_label                      - rp
-# @settings/lrp                             - rp
-# @settings/quote_color <color string>      - rp?
-# @settings/name_color <color string>       - rp?
-# @settings/posebreak                       - rp
-# @settings/highlight_place_color           - rp
-
-# @inform/shopminimum <number>              - craft
-
-# @inform/bankminimum <type>,<number>       - bank
-
-# TODO list
-# @settings/newline_on_messages             - ???
-
-
 # TODO: use a RegexValidator for this
 def validate_color(value):
     # TODO: This needs regex for foreground and background both.
@@ -57,6 +26,8 @@ class CategorySettings(SharedMemoryModel):
         abstract = True
 
     category = "Unknown"
+    table_exclude = ()
+    color_settings = ()
 
     def has_setting(self, setting_name):
         try:
@@ -64,6 +35,19 @@ class CategorySettings(SharedMemoryModel):
             return True
         except FieldDoesNotExist:
             return False
+
+    def get_setting_value(self, setting_name):
+        value = getattr(self, setting_name)
+
+        if isinstance(value, bool):
+            return "On" if value else "Off"
+
+        # TODO: This should be f"{value}{raw(value)}" but EvTable or ANSIString
+        # is being weird about parsing ||.
+        if setting_name in self.color_settings:
+            return f"{value}Color"
+
+        return value
 
     def get_table(self):
         fields = self._meta.get_fields()
@@ -75,18 +59,14 @@ class CategorySettings(SharedMemoryModel):
             valign="t",
         )
 
-        # Checking for what fields to add by way of which ones have help_text
-        # defined.  CraftSettings and BankSettings will be overriding get_table()
-        # due to the nature of their settings.
+        # Add to the table each field not specifically excluded from it.
         for field in fields:
-            if field.help_text:
-                # TODO: Check for the presence of color codes and bools and adjust
-                # the output accordingly.
-                value = getattr(self, field.name)
-                if isinstance(value, bool):
-                    value = "On" if value else "Off"
+            if field.name in self.table_exclude:
+                continue
 
-                table.add_row(field.name, field.help_text, value)
+            value = self.get_setting_value(field.name)
+
+            table.add_row(field.name, field.help_text, value)
 
         # Reformat table as follows:
         # - Settings names are centered.
@@ -106,7 +86,7 @@ class CategorySettings(SharedMemoryModel):
         return table
 
 
-class AllSettings(CategorySettings):
+class PlayerSettings(CategorySettings):
     category = "All"
 
     class Meta:
@@ -134,53 +114,57 @@ class AllSettings(CategorySettings):
     # bank: "BankSettings"
 
     def get_table(self):
-        # Going to redo.  For displaying "all" settings, I want to have faux
-        # subheaders for each category.  This seems to mean a separate row
-        # with "subheader_settings" involved where the cells are basically borderless
-        # except for perhaps the bottom.  (i.e., no top, left, right borders)
+        all_table = EvTable(valign="t")
 
-        # Example as shown to the caller:
-        """
-        +---------+
-        | General |
-        +---------+--------------------------------------+
-        | setting | blahblabhlahblahblahblahblah | value |
-        | setting | alskdjfasdhfakljdhflkasjdfhf | value |
-        +------------------------------------------------+
+        category_models = [self.general, self.rp, self.comm]
 
-        +---------+
-        |   RP    |
-        +---------+--------------------------------------+
-        | setting | blahblabhlahblahblahblahblah | value |
-        | setting | alskdjfasdhfakljdhflkasjdfhf | value |
-        +------------------------------------------------+
+        # This keeps track of which rows will have border_bottom=1.
+        # Have to do it this way because EvTable will apply settings
+        # a little oddly when using add_row(); putting kwargs in the
+        # first row sets column-specific settings that can't be
+        # overridden by reformat_cell().
+        subheader_rows = []
 
-        """
-        # It might also mean "multiple tables".  We'll see.
+        # For each category:
+        # - Add a "category" row to all_table
+        # - Add the rows of the category's columns to all_table
+        for category_model in category_models:
+            all_table.add_row(f"|w{category_model.category}", "", "")
 
-        # I think what I want to do is this:
-        # - make each category's subtable and stick in an iterable
-        # - for each subtable, subtable.get() the rows
-        # - rows.join() into one bigass str
+            fields = category_model._meta.get_fields()
 
-        tables = []
+            for field in fields:
+                if field.name in category_model.table_exclude:
+                    continue
+                value = category_model.get_setting_value(field.name)
+                all_table.add_row(field.name, field.help_text, value)
 
-        tables.append(self.general.get_table())
-        tables.append(self.rp.get_table())
-        tables.append(self.comm.get_table())
+            subheader_rows.append(all_table.nrows - 1)
 
-        return "\n".join(str(table) for table in tables)
+        # Setting names and values are center-aligned.
+        all_table.table[0].reformat(align="c", pad_bottom=1)
+        all_table.table[1].reformat(width=40, pad_bottom=1)
+        all_table.table[2].reformat(align="c", pad_bottom=1)
+
+        # Format each "end of category" row to have no bottom padding
+        # and a border at the bottom.
+        for row in subheader_rows:
+            for column in all_table.table:
+                column.reformat_cell(row, pad_bottom=0, border_bottom=1)
+
+        return all_table
 
 
 class GeneralSettings(CategorySettings):
-    category = "General"
-
     class Meta:
         verbose_name = "General Settings"
         verbose_name_plural = "General Settings"
 
+    category = "General"
+    table_exclude = ("base",)
+
     base = models.OneToOneField(
-        AllSettings,
+        PlayerSettings,
         on_delete=models.CASCADE,
         editable=False,
         primary_key=True,
@@ -237,14 +221,15 @@ class GeneralSettings(CategorySettings):
 
 
 class CommSettings(CategorySettings):
-    category = "Communication"
-
     class Meta:
         verbose_name = "Comm Settings"
         verbose_name_plural = "Comm Settings"
 
+    category = "Communication"
+    table_exclude = ("base",)
+
     base = models.OneToOneField(
-        AllSettings,
+        PlayerSettings,
         on_delete=models.CASCADE,
         editable=False,
         primary_key=True,
@@ -278,14 +263,16 @@ class CommSettings(CategorySettings):
 
 
 class RPSettings(CategorySettings):
-    category = "RP"
-
     class Meta:
         verbose_name = "RP Settings"
         verbose_name_plural = "RP Settings"
 
+    category = "RP"
+    table_exclude = ("base",)
+    color_settings = ("pose_quote_color", "pose_mention_color", "place_name_color")
+
     base = models.OneToOneField(
-        AllSettings,
+        PlayerSettings,
         on_delete=models.CASCADE,
         editable=False,
         primary_key=True,
@@ -327,6 +314,7 @@ class RPSettings(CategorySettings):
 
 # class CraftSettings(CategorySettings):
 #     category = "Crafting"
+#     table_exclude = ("base",)
 
 #     # TODO: Should I have ShopSettings with this in it?
 #     # I think more db models need to exist before this is possible.  Namely:
@@ -348,6 +336,7 @@ class RPSettings(CategorySettings):
 
 # class BankSettings(CategorySettings):
 #     category = "Banking"
+#     table_exclude = ("base",)
 
 #     # related models
 #     # resources -> Manager?[BankResourceSetting]
