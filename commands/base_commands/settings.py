@@ -11,7 +11,12 @@ from django.core.exceptions import FieldDoesNotExist
 from evennia import EvTable, InterruptCommand
 
 from commands.base import ArxCommand
-from world.settings.models import AllSettings, CommSettings, GeneralSettings, RPSettings
+from world.settings.models import (
+    PlayerSettings,
+    CommSettings,
+    GeneralSettings,
+    RPSettings,
+)
 
 
 class CmdSettings(ArxCommand):
@@ -60,7 +65,7 @@ class CmdSettings(ArxCommand):
         # This is a map between the command's categories and the models.
         # Largely used towards calling get_table() and _meta.get_field() for
         # each category.
-        "all": AllSettings,
+        "all": PlayerSettings,
         "general": GeneralSettings,
         "comm": CommSettings,
         "rp": RPSettings,
@@ -69,10 +74,11 @@ class CmdSettings(ArxCommand):
     }
 
     error_msgs = {
-        "usage_category": "Usage: settings <category>",
-        "usage_setting": "Usage: settings <category>/<setting_name>=<value>",
-        "usage_find": "Usage: settings/find <setting_name>",
-        "usage_apply": "Usage: settings/apply <category>[/<setting_name>]=<character>",
+        "usage_msg": "Usage:{syntax_msg}",
+        "syntax_category": "settings <category>",
+        "syntax_setting": "settings <category>/<setting_name>=<value>",
+        "syntax_find": "settings/find <setting_name>",
+        "syntax_apply": "settings/apply <category>[/<setting_name>]=<character>",
         "invalid_category": "{category} is not a valid settings category.\nCategories: {valid_categories}",
         "invalid_setting_category": '"all" is not a valid category for setting a specific setting.\nUse settings/find to find that setting\'s category.',
         "invalid_setting_name": "'{setting_name}' is not a setting in category '{category}'.",
@@ -80,9 +86,10 @@ class CmdSettings(ArxCommand):
         "setting_not_configured": "Your character doesn't have settings configured for '{category}'.\n|w*** Notify staff of this problem. ***|n",
     }
 
-    # User input set by parse():
+    # Command-specific variables set by parse():
     category: str
     setting_name: str
+    settings: dict
 
     def parse(self):
         super().parse()
@@ -96,6 +103,30 @@ class CmdSettings(ArxCommand):
             "rp": self.caller.settings.rp,
             "comm": self.caller.settings.comm,
         }
+
+        # If caller typed only the command (with possible switch),
+        # then send a usage message back to them.
+        if not self.args:
+            if "find" in self.switches:
+                keys = ("syntax_find",)
+            elif "apply" in self.switches:
+                keys = ("syntax_apply",)
+            else:
+                keys = (
+                    "syntax_category",
+                    "syntax_setting",
+                    "syntax_find",
+                    "syntax_apply",
+                )
+
+            if len(keys) == 1:
+                syntax_msg = f" {self.error_msgs[keys[0]]}"
+            else:
+                syntax_msg = "\n".join((f"  {self.error_msgs[key]}" for key in keys))
+
+            response = self.error_msgs["usage_msg"].format(syntax_msg=syntax_msg)
+            self.caller.msg(response)
+            raise InterruptCommand
 
         # If we're finding a setting, we "should" just have a setting_name
         # in the input/args and that's all we need to do here.
@@ -111,21 +142,10 @@ class CmdSettings(ArxCommand):
             self.category = self.lhs
 
         self.category = self.category.lower() if self.category else None
-        self.setting_name = self.category.lower() if self.setting_name else None
+        self.setting_name = self.setting_name.lower() if self.setting_name else None
 
     def func(self):
-        # This command always requires input beyond the command name.
-        if not self.args:
-            response = "\n".join(
-                (
-                    self.error_msgs["usage_category"],
-                    self.error_msgs["usage_setting"],
-                    self.error_msgs["usage_find"],
-                    self.error_msgs["usage_apply"],
-                )
-            )
-            self.caller.msg(response)
-            raise InterruptCommand
+        self.validate()
 
         if "find" in self.switches:
             self.find()
@@ -141,6 +161,25 @@ class CmdSettings(ArxCommand):
                 self.display_setting()
             else:
                 self.display_category()
+
+    def validate(self):
+        if not self.switches:
+            # If we're just looking at a category, validate it.
+            # If we're looking at a specific setting, validate the setting too.
+            self.validate_category()
+            if self.setting_name:
+                self.validate_setting()
+        elif "find" in self.switches:
+            # If we're finding a setting, we don't need to validate anything.
+            # The (sub)string entered by the caller is searched.
+            pass
+        elif "apply" in self.switches:
+            # If we're applying a setting, the category and alt need to be validated.
+            # If we're applying a specific setting, the setting needs validated too.
+            self.validate_category()
+            if self.setting_name:
+                self.validate_setting()
+            self.validate_alt()
 
     def validate_category(self):
         """
@@ -187,8 +226,6 @@ class CmdSettings(ArxCommand):
         Displays the table or tables for the specified category, showing the
         caller's settings.
         """
-        self.validate_category()
-
         table = self.settings[self.category].get_table()
         self.caller.msg(table)
 
@@ -196,9 +233,6 @@ class CmdSettings(ArxCommand):
         """
         Displays the requested setting, its help_text, and current value.
         """
-        self.validate_category()
-        self.validate_setting()
-
         settings = self.settings[self.category]
         setting_field = settings._meta.get_field(self.setting_name)
         setting_value = getattr(settings, self.setting_name)
