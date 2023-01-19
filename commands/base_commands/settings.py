@@ -11,12 +11,8 @@ from django.core.exceptions import ValidationError
 from evennia import EvTable, InterruptCommand
 
 from commands.base import ArxCommand
-from world.settings.models import (
-    CommSettings,
-    GeneralSettings,
-    PlayerSettings,
-    RPSettings,
-)
+from typeclasses.characters import Character
+from world.settings.models import PlayerSettings
 
 
 class CmdSettings(ArxCommand):
@@ -47,11 +43,11 @@ class CmdSettings(ArxCommand):
       rp      - settings related to RP (emits/poses)
 
     Examples:
-      settings all           - shows all settings
-      settings rp/color=|g   - sets color setting in rp category to |g
-      settings/find msg      - find all settings with "msg" in the name
-      settings/apply all=Alt - applies all of your settings to Alt
-      settings/apply rp=Alt  - applies each rp setting to Alt
+      settings all                - shows all settings
+      settings rp/color=|g        - sets "color" setting in rp category to |g
+      settings/find msg           - find all settings with "msg" in the name
+      settings/apply all=Alt      - applies all of your settings to Alt
+      settings/apply rp/color=Alt - applies "color" setting in rp to Alt
     """
 
     key = "settings"
@@ -66,33 +62,29 @@ class CmdSettings(ArxCommand):
         "syntax_setting": "settings <category>/<setting_name>=<value>",
         "syntax_find": "settings/find <setting_name>",
         "syntax_apply": "settings/apply <category>[/<setting_name>]=<character>",
-        "invalid_category": "{category} is not a valid settings category.\nCategories: {valid_categories}",
-        "invalid_setting_category": '"all" is not a valid category for setting a specific setting.\nUse settings/find to find that setting\'s category.',
+        "invalid_category": "{category} is not a valid settings category.\n(valid categories: {valid_categories})",
+        "all_not_valid": '"all" is not a valid category for setting a specific setting.\nUse settings/find to find that setting\'s category.',
         "invalid_setting_name": "{setting_name} is not a setting in category '{category}'.",
+        "invalid_alt": "{alt_name} is not one of your characters.",
         "no_settings_found": 'No settings found with names containing "{setting_name}"',
-        "setting_not_configured": "Your character doesn't have settings configured for category '{category}'.\n|w*** Notify staff of this problem. ***|n",
+        "setting_not_configured": "Your character doesn't have settings data set up for category '{category}'.\n|w*** Notify staff of this problem. ***|n",
+        "find_results": '|wResults for "{setting_name}"|n\n{table}',
         "setting_set": "{category}/{setting_name} set to {setting_value}.",
+        "applied_category": "Applied {category} settings to {alt_name}.",
+        "applied_setting": "Applied {category}/{setting_name} setting to {alt_name}.",
+        "alt_applied_category": "{category} settings were applied by {character}.",
+        "alt_applied_setting": "Setting '{category}/{setting_name}' ({value}) was applied by {character}.",
     }
 
     def parse(self):
         super().parse()
 
-        SettingsTuple = namedtuple("SettingsTuple", ["settings", "model"])
-
         self.category: str = None
         self.setting_name: str = None
         self.alt_name: str = None
-
-        self.settings_map = {
-            "all": SettingsTuple(settings=self.caller.settings, model=PlayerSettings),
-            "general": SettingsTuple(
-                settings=self.caller.settings.general, model=GeneralSettings
-            ),
-            "rp": SettingsTuple(settings=self.caller.settings.rp, model=RPSettings),
-            "comm": SettingsTuple(
-                settings=self.caller.settings.comm, model=CommSettings
-            ),
-        }
+        self.character: Character = self.caller.char_ob
+        self.settings: PlayerSettings = self.character.settings
+        self.alt: Character = None
 
         # Validate syntax.
         usage_keys = ()
@@ -113,7 +105,12 @@ class CmdSettings(ArxCommand):
         else:
             # If we're looking for a category or a specific setting...
             if not self.args:
-                usage_keys = ("syntax_category", "syntax_setting")
+                usage_keys = (
+                    "syntax_category",
+                    "syntax_setting",
+                    "syntax_find",
+                    "syntax_apply",
+                )
             else:
                 self.category, self.setting_name = self.parse_lhs()
 
@@ -184,13 +181,13 @@ class CmdSettings(ArxCommand):
 
     def validate_category(self):
         """
-        Validates the input category against those defined in settings_map.
+        Validates the input category against those defined in valid_categories.
         """
 
-        if self.category not in self.settings_map.keys():
+        if self.category not in self.settings.valid_categories:
             response = self.cmd_msgs["invalid_category"].format(
                 category=self.category,
-                valid_categories=", ".join(self.settings_map.keys()),
+                valid_categories=", ".join(self.settings.valid_categories),
             )
             self.caller.msg(response)
             raise InterruptCommand
@@ -206,11 +203,11 @@ class CmdSettings(ArxCommand):
 
         # Settings don't directly exist in the 'all' category; it's invalid.
         if self.category == "all":
-            self.caller.msg(self.cmd_msgs["invalid_setting_category"])
+            self.caller.msg(self.cmd_msgs["all_not_valid"])
             raise InterruptCommand
 
         # Validate whether setting exists on the model.
-        settings = self.settings_map[self.category].settings
+        settings = self.settings.get_category(self.category)
         if not settings.has_setting(self.setting_name):
             response = self.cmd_msgs["invalid_setting_name"].format(
                 category=self.category, setting_name=self.setting_name
@@ -219,26 +216,35 @@ class CmdSettings(ArxCommand):
             raise InterruptCommand
 
     def validate_alt(self):
-        # TODO: Implement me.
-        pass
+        """
+        Validates that the input alt name is also a character played by the caller.
+        """
+
+        alt_names = (character.key.title() for character in self.character.alts)
+
+        # Validate if given alt name is among those attached to the account.
+        if self.alt_name not in alt_names:
+            response = self.cmd_msgs["invalid_alt"].format(alt_name=self.alt_name)
+            self.caller.msg(response)
+            raise InterruptCommand
 
     def display_category(self):
         """
         Displays the table or tables for the specified category, showing the
         caller's settings.
         """
-        table = self.settings_map[self.category].settings.get_table()
+        table = self.settings.get_category(self.category).get_table()
         self.caller.msg(table)
 
     def display_setting(self):
         """
         Displays the requested setting, its help_text, and current value.
         """
-        settings = self.settings_map[self.category].settings
-        setting_field = settings._meta.get_field(self.setting_name)
-        setting_value = settings.get_setting_value(self.setting_name)
+        settings = self.settings.get_category(self.category)
+        setting_field = settings.get_field(self.setting_name)
+        setting_value = settings.get_setting(self.setting_name)
 
-        table = EvTable(border="tablecols", valign="t")
+        table = EvTable(valign="t")
         table.add_row(setting_field.name, setting_field.help_text, setting_value)
 
         table.table[0].reformat(align="c")
@@ -257,12 +263,12 @@ class CmdSettings(ArxCommand):
         found_settings = []
         # For each model in our settings library, look for a field with
         # that setting's name.  If it exists, add it to the list.
-        for category, setting_tuple in self.settings_map.items():
+        for category in self.settings.valid_categories:
             # Nothing to be found in "all"; move on.
             if category == "all":
                 continue
 
-            fields = setting_tuple.model._meta.get_fields()
+            fields = self.settings.get_category(category).get_fields()
 
             category_settings = [
                 FoundSetting(
@@ -297,28 +303,82 @@ class CmdSettings(ArxCommand):
         table.table[1].reformat(align="c")
         table.table[2].reformat(width=40)
 
-        response = f'|wResults for "{self.setting_name}"|n\n{table}'
+        response = self.cmd_msgs["find_results"].format(
+            setting_name=self.setting_name, table=table
+        )
         self.caller.msg(response)
 
     def apply(self):
         """
-        Applies specified setting(s) to specified alt, if that character IS
-        an alt of the caller.
+        Applies the specified setting(s) to specified alt.
         """
-        # Steps:
-        # - Get alt char's settings.
-        # - Put settings and their categories to apply in a list.
-        # - For each setting in list, setattr() on alt.
-        pass
+        self.alt = self.caller.search(self.alt_name, global_search=True)
+
+        if not self.alt:
+            self.caller.msg("apply() - kaboom for finding the alt")
+            raise InterruptCommand
+
+        if self.setting_name:
+            self.apply_setting()
+        else:
+            self.apply_category()
+
+    def apply_setting(self):
+        """
+        Applies one specific setting to the alt.
+        """
+        self.settings.copy_one(self.alt.settings, self.setting_name)
+
+        caller_response = self.cmd_msgs["applied_setting"].format(
+            category=self.category,
+            setting_name=self.setting_name,
+            alt_name=self.alt_name,
+        )
+        alt_response = self.cmd_msgs["alt_applied_setting"].format(
+            category=self.category,
+            setting_name=self.setting_name,
+            alt_name=self.alt_name,
+            value=self.alt.settings.get_setting(self.setting_name),
+        )
+
+        self.caller.msg(caller_response)
+        self.alt.msg(alt_response)
+
+    def apply_category(self):
+        """
+        Applies all settings in the specified category to the alt.
+        """
+        # If we're applying a category, then we need to distinguish between
+        # all and a specific category.  All means we iterate and copy each
+        # category's settings.
+        if self.category == "all":
+            for settings, alt_settings in zip(
+                self.settings.categories(), self.alt.settings.categories()
+            ):
+                settings.copy_all(alt_settings)
+        else:
+            settings = self.settings.get_category(self.category)
+            alt_settings = self.alt.settings.get_category(self.category)
+
+            settings.copy_all(alt_settings)
+
+        caller_response = self.cmd_msgs["applied_category"].format(
+            category=self.category, alt_name=self.alt_name
+        )
+        alt_response = self.cmd_msgs["alt_applied_category"].format(
+            category=self.category, character=self.character
+        )
+
+        self.caller.msg(caller_response)
+        self.alt.msg(alt_response)
 
     def set_setting(self):
         """
         Sets the specified setting for the caller.
         """
         try:
-            settings = self.settings_map[self.category].settings
-            setattr(settings, self.setting_name, self.rhs)
-            settings.save()
+            settings = self.settings.get_category(self.category)
+            settings.set_setting(self.setting_name, self.rhs)
         except ValidationError as error:
             self.caller.msg("\n".join(error.messages))
             raise InterruptCommand
@@ -326,6 +386,6 @@ class CmdSettings(ArxCommand):
         response = self.cmd_msgs["setting_set"].format(
             category=self.category,
             setting_name=self.setting_name,
-            setting_value=settings.get_setting_value(self.setting_name),
+            setting_value=settings.get_setting(self.setting_name),
         )
         self.caller.msg(response)
