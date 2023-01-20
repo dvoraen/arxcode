@@ -1,25 +1,28 @@
 from django.contrib import admin
 
 from world.settings.models import (
-    PlayerSettings,
     CommSettings,
     GeneralSettings,
+    PlayerSettings,
     RPSettings,
 )
 
 
 class GeneralSettingsInline(admin.StackedInline):
     model = GeneralSettings
+    exclude = ("base",)
     can_delete = False
 
 
 class CommSettingsInline(admin.StackedInline):
     model = CommSettings
+    exclude = ("base",)
     can_delete = False
 
 
 class RPSettingsInline(admin.StackedInline):
     model = RPSettings
+    exclude = ("base",)
     can_delete = False
 
 
