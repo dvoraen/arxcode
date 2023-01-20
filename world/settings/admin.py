@@ -10,24 +10,24 @@ from world.settings.models import (
 
 class GeneralSettingsInline(admin.StackedInline):
     model = GeneralSettings
-    exclude = ("base",)
+    readonly_fields = ("base",)
     can_delete = False
 
 
 class CommSettingsInline(admin.StackedInline):
     model = CommSettings
-    exclude = ("base",)
+    readonly_fields = ("base",)
     can_delete = False
 
 
 class RPSettingsInline(admin.StackedInline):
     model = RPSettings
-    exclude = ("base",)
+    readonly_fields = ("base",)
     can_delete = False
 
 
 class PlayerSettingsAdmin(admin.ModelAdmin):
-    # readonly_fields = ("character",)
+    readonly_fields = ("character",)
     inlines = [GeneralSettingsInline, CommSettingsInline, RPSettingsInline]
 
 
