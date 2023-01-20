@@ -5,14 +5,13 @@ This module defines the "settings" command and those related to the user experie
 """
 
 
-from collections import namedtuple
+from typing import List
 
-from django.core.exceptions import ValidationError
 from evennia import EvTable, InterruptCommand
 
 from commands.base import ArxCommand
 from typeclasses.characters import Character
-from world.settings.models import PlayerSettings
+from world.settings.models import PlayerSettings, Setting, SettingsError
 
 
 class CmdSettings(ArxCommand):
@@ -79,7 +78,7 @@ class CmdSettings(ArxCommand):
     def parse(self):
         super().parse()
 
-        self.category: str = None
+        self.category_name: str = None
         self.setting_name: str = None
         self.alt_name: str = None
         self.character: Character = self.caller.char_ob
@@ -100,7 +99,7 @@ class CmdSettings(ArxCommand):
             if not self.args or not self.rhs:
                 usage_keys = ("syntax_apply",)
             else:
-                self.category, self.setting_name = self.parse_lhs()
+                self.category_name, self.setting_name = self.parse_lhs()
                 self.alt_name = self.rhs
         else:
             # If we're looking for a category or a specific setting...
@@ -112,7 +111,7 @@ class CmdSettings(ArxCommand):
                     "syntax_apply",
                 )
             else:
-                self.category, self.setting_name = self.parse_lhs()
+                self.category_name, self.setting_name = self.parse_lhs()
 
         # If we have any syntax errors that requires notifying the caller of
         # the command's usage, do so and end the command.
@@ -129,7 +128,7 @@ class CmdSettings(ArxCommand):
             raise InterruptCommand
 
         # Format the user input accordingly.
-        self.category = self.category.lower() if self.category else None
+        self.category_name = self.category_name.lower() if self.category_name else None
         self.setting_name = self.setting_name.lower() if self.setting_name else None
         self.alt_name = self.alt_name.title() if self.alt_name else None
 
@@ -153,9 +152,9 @@ class CmdSettings(ArxCommand):
             # If we have a setting name with a category and value, then user is
             # intending to set a setting.  Otherwise, just display
             # that setting or category.
-            if self.category and self.setting_name and self.rhs:
+            if self.category_name and self.setting_name and self.rhs:
                 self.set_setting()
-            elif self.category and self.setting_name and not self.rhs:
+            elif self.category_name and self.setting_name and not self.rhs:
                 self.display_setting()
             else:
                 self.display_category()
@@ -184,9 +183,9 @@ class CmdSettings(ArxCommand):
         Validates the input category against those defined in valid_categories.
         """
 
-        if self.category not in self.settings.valid_categories:
+        if self.category_name not in self.settings.valid_categories:
             response = self.cmd_msgs["invalid_category"].format(
-                category=self.category,
+                category=self.category_name,
                 valid_categories=", ".join(self.settings.valid_categories),
             )
             self.caller.msg(response)
@@ -202,15 +201,15 @@ class CmdSettings(ArxCommand):
         """
 
         # Settings don't directly exist in the 'all' category; it's invalid.
-        if self.category == "all":
+        if self.category_name == "all":
             self.caller.msg(self.cmd_msgs["all_not_valid"])
             raise InterruptCommand
 
         # Validate whether setting exists on the model.
-        settings = self.settings.get_category(self.category)
-        if not settings.has_setting(self.setting_name):
+        category = self.settings.get_category(self.category_name)
+        if not category.has_setting(self.setting_name):
             response = self.cmd_msgs["invalid_setting_name"].format(
-                category=self.category, setting_name=self.setting_name
+                category=self.category_name, setting_name=self.setting_name
             )
             self.caller.msg(response)
             raise InterruptCommand
@@ -233,19 +232,18 @@ class CmdSettings(ArxCommand):
         Displays the table or tables for the specified category, showing the
         caller's settings.
         """
-        table = self.settings.get_category(self.category).get_table()
+        table = self.settings.get_category(self.category_name).get_table()
         self.caller.msg(table)
 
     def display_setting(self):
         """
         Displays the requested setting, its help_text, and current value.
         """
-        settings = self.settings.get_category(self.category)
-        setting_field = settings.get_field(self.setting_name)
-        setting_value = settings.get_setting(self.setting_name)
+        category = self.settings.get_category(self.category_name)
+        setting = category.get_setting(self.setting_name)
 
         table = EvTable(valign="t")
-        table.add_row(setting_field.name, setting_field.help_text, setting_value)
+        table.add_row(setting.name, setting.help_text, setting.value)
 
         table.table[0].reformat(align="c")
         table.table[1].reformat(width=40)
@@ -258,9 +256,7 @@ class CmdSettings(ArxCommand):
         Finds all settings with the given setting name and displays a table
         with the settings' names, categories, and help_text.
         """
-        FoundSetting = namedtuple("FoundSetting", ["name", "category", "help_text"])
-
-        found_settings = []
+        found_settings: List[Setting] = []
         # For each model in our settings library, look for a field with
         # that setting's name.  If it exists, add it to the list.
         for category in self.settings.valid_categories:
@@ -268,17 +264,15 @@ class CmdSettings(ArxCommand):
             if category == "all":
                 continue
 
-            fields = self.settings.get_category(category).get_fields()
+            category = self.settings.get_category(category)
 
-            category_settings = [
-                FoundSetting(
-                    name=field.name, category=category, help_text=field.help_text
-                )
-                for field in fields
-                if self.setting_name in field.name
+            found_category_settings = [
+                setting
+                for setting in category.settings()
+                if self.setting_name in setting.name
             ]
 
-            found_settings.extend(category_settings)
+            found_settings.extend(found_category_settings)
 
         if not found_settings:
             response = self.cmd_msgs["no_settings_found"].format(
@@ -290,7 +284,9 @@ class CmdSettings(ArxCommand):
         table = EvTable(valign="t")
 
         for setting in found_settings:
-            table.add_row(setting.name, setting.category, setting.help_text)
+            table.add_row(
+                setting.name, setting.category, setting.help_text, setting.value
+            )
 
         # Last row has no padding at the bottom.
         for column in table.table:
@@ -302,6 +298,7 @@ class CmdSettings(ArxCommand):
         table.table[0].reformat(align="c")
         table.table[1].reformat(align="c")
         table.table[2].reformat(width=40)
+        table.table[3].reformat(align="c")
 
         response = self.cmd_msgs["find_results"].format(
             setting_name=self.setting_name, table=table
@@ -314,6 +311,7 @@ class CmdSettings(ArxCommand):
         """
         self.alt = self.caller.search(self.alt_name, global_search=True)
 
+        # TODO: Verify this is necessary.
         if not self.alt:
             self.caller.msg("apply() - kaboom for finding the alt")
             raise InterruptCommand
@@ -327,18 +325,21 @@ class CmdSettings(ArxCommand):
         """
         Applies one specific setting to the alt.
         """
-        self.settings.copy_one(self.alt.settings, self.setting_name)
+        src_category = self.settings.get_category(self.category_name)
+        alt_category = self.alt.settings.get_category(self.category_name)
+
+        src_category.copy_one(alt_category, self.setting_name)
 
         caller_response = self.cmd_msgs["applied_setting"].format(
-            category=self.category,
+            category=self.category_name,
             setting_name=self.setting_name,
             alt_name=self.alt_name,
         )
         alt_response = self.cmd_msgs["alt_applied_setting"].format(
-            category=self.category,
+            category=self.category_name,
             setting_name=self.setting_name,
             alt_name=self.alt_name,
-            value=self.alt.settings.get_setting(self.setting_name),
+            value=self.alt.settings.get_setting_value(self.setting_name),
         )
 
         self.caller.msg(caller_response)
@@ -351,22 +352,22 @@ class CmdSettings(ArxCommand):
         # If we're applying a category, then we need to distinguish between
         # all and a specific category.  All means we iterate and copy each
         # category's settings.
-        if self.category == "all":
-            for settings, alt_settings in zip(
+        if self.category_name == "all":
+            for src_settings, alt_settings in zip(
                 self.settings.categories(), self.alt.settings.categories()
             ):
-                settings.copy_all(alt_settings)
+                src_settings.copy_all(alt_settings)
         else:
-            settings = self.settings.get_category(self.category)
-            alt_settings = self.alt.settings.get_category(self.category)
+            src_settings = self.settings.get_category(self.category_name)
+            alt_settings = self.alt.settings.get_category(self.category_name)
 
-            settings.copy_all(alt_settings)
+            src_settings.copy_all(alt_settings)
 
         caller_response = self.cmd_msgs["applied_category"].format(
-            category=self.category, alt_name=self.alt_name
+            category=self.category_name, alt_name=self.alt_name
         )
         alt_response = self.cmd_msgs["alt_applied_category"].format(
-            category=self.category, character=self.character
+            category=self.category_name, character=self.character
         )
 
         self.caller.msg(caller_response)
@@ -377,15 +378,15 @@ class CmdSettings(ArxCommand):
         Sets the specified setting for the caller.
         """
         try:
-            settings = self.settings.get_category(self.category)
-            settings.set_setting(self.setting_name, self.rhs)
-        except ValidationError as error:
-            self.caller.msg("\n".join(error.messages))
+            category = self.settings.get_category(self.category_name)
+            category.set_setting(self.setting_name, self.rhs)
+        except SettingsError as error:
+            self.caller.msg(error)
             raise InterruptCommand
 
         response = self.cmd_msgs["setting_set"].format(
-            category=self.category,
+            category=self.category_name,
             setting_name=self.setting_name,
-            setting_value=settings.get_setting(self.setting_name),
+            setting_value=category.get_setting_value(self.setting_name),
         )
         self.caller.msg(response)
