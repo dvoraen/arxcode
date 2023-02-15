@@ -182,11 +182,12 @@ class CmdSettings(ArxCommand):
         """
         Validates the input category against those defined in valid_categories.
         """
+        valid_categories = self.settings.valid_categories
 
-        if self.category_name not in self.settings.valid_categories:
+        if self.category_name not in valid_categories:
             response = self.cmd_msgs["invalid_category"].format(
                 category=self.category_name,
-                valid_categories=", ".join(self.settings.valid_categories),
+                valid_categories=", ".join(valid_categories),
             )
             self.caller.msg(response)
             raise InterruptCommand
@@ -259,20 +260,12 @@ class CmdSettings(ArxCommand):
         found_settings: List[Setting] = []
         # For each model in our settings library, look for a field with
         # that setting's name.  If it exists, add it to the list.
-        for category in self.settings.valid_categories:
-            # Nothing to be found in "all"; move on.
-            if category == "all":
-                continue
-
-            category = self.settings.get_category(category)
-
-            found_category_settings = [
+        for category in self.settings.categories():
+            found_settings.extend(
                 setting
                 for setting in category.settings()
                 if self.setting_name in setting.name
-            ]
-
-            found_settings.extend(found_category_settings)
+            )
 
         if not found_settings:
             response = self.cmd_msgs["no_settings_found"].format(
@@ -387,6 +380,6 @@ class CmdSettings(ArxCommand):
         response = self.cmd_msgs["setting_set"].format(
             category=self.category_name,
             setting_name=self.setting_name,
-            setting_value=category.get_setting_value(self.setting_name),
+            setting_value=self.rhs,
         )
         self.caller.msg(response)
